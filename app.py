@@ -4,6 +4,8 @@ import datetime
 import sqlite3
 import plotly.express as px
 import os
+import io
+import streamlit.components.v1 as components
 
 # Configuración de página con tema premium expandido
 st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzado", page_icon="⚡")
@@ -19,6 +21,7 @@ st.sidebar.markdown("👤 **Modo:** Acceso Total Abierto")
 st.sidebar.title("Navegación del Sistema")
 opcion = st.sidebar.radio("Ir a la pestaña:", [
     "📈 Analítica Avanzada y KPIs", 
+    "📂 Visión por Proyecto y Detalle",
     "📦 Inventario y Conteo de Columnas", 
     "📝 Carga y Gestión de Campo", 
     "📥 Migración Inicial (Excel)"
@@ -117,7 +120,7 @@ if not os.path.exists(CARPA_ARCHIVOS):
     os.makedirs(CARPA_ARCHIVOS)
 
 # -------------------------------------------------------------------------
-# MÓDULO 4: MIGRACIÓN INICIAL DESDE EXCEL
+# MÓDULO 5: MIGRACIÓN INICIAL DESDE EXCEL
 # -------------------------------------------------------------------------
 if opcion == "📥 Migración Inicial (Excel)":
     st.subheader("📥 Inicialización y Carga de Planilla Maestra Excel")
@@ -198,7 +201,76 @@ if opcion == "📥 Migración Inicial (Excel)":
                 st.error(f"❌ Error al procesar el Excel: {e}")
 
 # -------------------------------------------------------------------------
-# MÓDULO 2: INVENTARIO Y CONTEO POR COLUMNAS (CORREGIDO Y DINÁMICO)
+# MÓDULO 2: VISIÓN POR PROYECTO Y DETALLE
+# -------------------------------------------------------------------------
+elif opcion == "📂 Visión por Proyecto y Detalle":
+    st.subheader("📂 Visión Detallada por Proyecto / Frente")
+    
+    conn = conectar_db()
+    try:
+        proyectos_df = pd.read_sql_query("SELECT DISTINCT tramo FROM piquetes", conn)
+        lista_proyectos = [t for t in proyectos_df['tramo'].dropna().tolist() if str(t).strip().lower() != 'nan' and str(t).strip() != '']
+    except Exception as e:
+        st.error(f"Error al conectar con la base de datos: {e}")
+        conn.close()
+        lista_proyectos = []
+
+    if not lista_proyectos:
+        st.warning("No hay datos cargados en la base de datos aún. Realiza una migración desde la pestaña de Excel.")
+        conn.close()
+    else:
+        idx_defecto = 0
+        if st.session_state.proyecto_activo in lista_proyectos:
+            idx_defecto = lista_proyectos.index(st.session_state.proyecto_activo)
+
+        proyecto_sel = st.selectbox("Seleccione el Proyecto / Frente a consultar:", lista_proyectos, index=idx_defecto)
+
+        if proyecto_sel:
+            df_proyecto = pd.read_sql_query("SELECT * FROM piquetes WHERE tramo = ?", conn, params=(proyecto_sel,))
+            
+            # Calcular avance individual por fila
+            hitos = ["excavacion", "verticalizado", "montaje_riendas", "tendido", "flechado", "engrampado"]
+            peso_por_hito = 100 / len(hitos)
+            df_proyecto["Avance_%"] = 0
+            for hito in hitos:
+                df_proyecto["Avance_%"] += df_proyecto[hito].notna().astype(int) * peso_por_hito
+            df_proyecto["Avance_%"] = df_proyecto["Avance_%"].round().astype(int)
+
+            # Resumen / Métricas rápidas
+            total_piquetes = len(df_proyecto)
+            avance_promedio = int(df_proyecto["Avance_%"].mean()) if total_piquetes > 0 else 0
+            completados = len(df_proyecto[df_proyecto["Avance_%"] == 100])
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown(f"""<div class='kpi-card' style='border-left-color: #3b82f6;'><div class='kpi-title'>📍 Total Piquetes</div><div class='kpi-value'>{total_piquetes}</div></div>""", unsafe_allow_html=True)
+            with col2:
+                st.markdown(f"""<div class='kpi-card' style='border-left-color: #10b981;'><div class='kpi-title'>✅ Piquetes 100% Finalizados</div><div class='kpi-value'>{completados}</div></div>""", unsafe_allow_html=True)
+            with col3:
+                st.markdown(f"""<div class='kpi-card' style='border-left-color: #f59e0b;'><div class='kpi-title'>📈 % Avance Físico Promedio</div><div class='kpi-value'>{avance_promedio}%</div></div>""", unsafe_allow_html=True)
+
+            st.markdown("---")
+            st.subheader("🔍 Filtrar y Explorar Piquetes Cargados")
+            
+            buscar_piquete = st.text_input("Buscar por Número / Código de Piquete:")
+            if buscar_piquete:
+                df_proyecto = df_proyecto[df_proyecto['piquete'].astype(str).str.contains(buscar_piquete, case=False, na=False)]
+
+            st.dataframe(df_proyecto, use_container_width=True)
+
+            # Botón de descarga CSV
+            csv = df_proyecto.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label=f"📥 Descargar datos del proyecto {proyecto_sel} (CSV)",
+                data=csv,
+                file_name=f"reporte_{proyecto_sel}.csv",
+                mime="text/csv",
+            )
+
+    conn.close()
+
+# -------------------------------------------------------------------------
+# MÓDULO 3: INVENTARIO Y CONTEO POR COLUMNAS
 # -------------------------------------------------------------------------
 elif opcion == "📦 Inventario y Conteo de Columnas":
     st.subheader("📦 Métricas de Inventario y Control de Columnas")
@@ -210,7 +282,6 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
     if df_obra.empty:
         st.info("No hay datos cargados en el sistema de control.")
     else:
-        # Calcular el porcentaje de avance por piquete para graficarlo aquí también
         hitos = ["excavacion", "verticalizado", "montaje_riendas", "tendido", "flechado", "engrampado"]
         peso_por_hito = 100 / len(hitos)
         df_obra["Avance_%"] = 0
@@ -227,7 +298,6 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         tramo_sel = st.selectbox("Filtrar Análisis por Frente/Tramo:", tramos_validos, index=idx_defecto)
         df_inv = df_obra[df_obra["tramo"] == tramo_sel].copy()
         
-        # --- NUEVA SECCIÓN DE MÉTRICAS GLOBALES DEL FRENTE ---
         total_piquetes_frente = len(df_inv)
         avance_medio_frente = df_inv["Avance_%"].mean() if total_piquetes_frente > 0 else 0
         
@@ -250,7 +320,6 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         col_sel = st.selectbox("Seleccione Parámetro a Graficar:", list(columnas_analizar.values()))
         col_real = [k for k, v in columnas_analizar.items() if v == col_sel][0]
         
-        # Limpieza flexible de nulos para gráficos de distribución
         df_filtrado_grafico = df_inv[[col_real]].copy()
         df_filtrado_grafico[col_real] = df_filtrado_grafico[col_real].replace(["None", "nan", "-", ""], None)
         df_filtrado_grafico = df_filtrado_grafico.dropna()
@@ -258,14 +327,12 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         if df_filtrado_grafico.empty:
             st.warning("No se detectaron registros válidos cargados para este parámetro específico.")
         else:
-            # Forzar tipo string para el conteo categórico (excepto si es el número de avance)
             if col_real != "Avance_%":
                 df_filtrado_grafico[col_real] = df_filtrado_grafico[col_real].astype(str)
                 
             df_frecuencia = df_filtrado_grafico[col_real].value_counts().reset_index()
             df_frecuencia.columns = [col_sel, "Cantidad de Piquetes"]
             
-            # Ordenar por porcentaje si es la columna de avance
             if col_real == "Avance_%":
                 df_frecuencia = df_frecuencia.sort_values(by=col_sel)
             
@@ -280,12 +347,11 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
                                    color_discrete_sequence=px.colors.qualitative.Safe)
                 st.plotly_chart(fig_donut, width='stretch')
                 
-        # Mostrar la lista plana de control abajo para verificación visual rápida
         with st.expander("🔍 Ver Listado Detallado de este Frente"):
             st.dataframe(df_inv[["piquete", "tipo_estructura", "tipo_de_equipo", "Avance_%"]], width='stretch')
 
 # -------------------------------------------------------------------------
-# MÓDULO 3: CARGA Y GESTIÓN DE CAMPO
+# MÓDULO 4: CARGA Y GESTIÓN DE CAMPO
 # -------------------------------------------------------------------------
 elif opcion == "📝 Carga y Gestión de Campo":
     st.subheader("📝 Gestión Operativa y Certificación de Avances")
@@ -307,7 +373,6 @@ elif opcion == "📝 Carga y Gestión de Campo":
         piquetes_filtrados = df_combos[df_combos["tramo"] == tramo_sel]["piquete"].unique()
         piquete_sel = st.selectbox("Estructura / Piquete Específico:", piquetes_filtrados)
         
-        # Volvemos a leer de la base de datos para obtener el estado más fresco antes del formulario
         conn = conectar_db()
         p_info = pd.read_sql_query("SELECT * FROM piquetes WHERE piquete = ?", conn, params=[piquete_sel]).iloc[0]
         conn.close()
@@ -392,7 +457,6 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 
                 st.session_state.proyecto_activo = tramo_sel
                 st.success(f"✔️ Historial y documentación de {piquete_sel} actualizados correctamente.")
-                # st.rerun() fuerza a Streamlit a redibujar la pantalla inmediatamente leyendo los datos nuevos
                 st.rerun()
 
 # -------------------------------------------------------------------------
@@ -549,12 +613,9 @@ else:
             df_mostrar[hito] = df_mostrar[hito].dt.strftime('%d/%m/%Y').fillna("-")
         
         columnas_visibles = ["tramo", "piquete", "tipo_estructura", "Avance_%", "anexo_montaje", "red_line"] + hitos
-        # --- SECCIÓN DE EXPORTACIÓN DE REPORTES CORREGIDA ---
         st.markdown("---")
         st.markdown("### 📥 Exportar Reportes de Trazabilidad")
         
-        # 1. Preparación del búfer en memoria para el archivo Excel
-        import io
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
             df_mostrar[columnas_visibles].to_excel(writer, sheet_name=f"Progreso_{tramo_sel}", index=False)
@@ -572,9 +633,6 @@ else:
             )
             
         with col_exp2:
-            # Alternativa nativa y segura: Código HTML/JS embebido en un componente ligero
-            import streamlit.components.v1 as components
-            
             st.markdown(
                 """
                 <style>
@@ -602,7 +660,6 @@ else:
                 """, unsafe_allow_html=True
             )
             
-            # Renderiza un botón real que llama a la ventana de impresión del sistema de forma segura
             components.html(
                 """
                 <button class="btn-print" onclick="window.parent.print()">📄 Guardar Reporte / KPIs (PDF)</button>
