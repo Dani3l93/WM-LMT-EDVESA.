@@ -5,6 +5,10 @@ import sqlite3
 import plotly.express as px
 import os
 import io
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 import streamlit.components.v1 as components
 
 # Configuración de página con tema premium expandido
@@ -13,6 +17,37 @@ st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzad
 # --- INICIALIZAR RUTA/ESTADO DE PROYECTO ---
 if "proyecto_activo" not in st.session_state:
     st.session_state.proyecto_activo = None
+
+# --- FUNCIÓN DE ENVÍO DE CORREO ELECTRONICO ---
+def enviar_reporte_correo(destinatarios, asunto, cuerpo, archivo_bytes, nombre_archivo):
+    try:
+        EMAIL_EMISOR = st.secrets["SMTP_EMAIL"]
+        PASSWORD_EMISOR = st.secrets["SMTP_PASSWORD"]
+    except Exception:
+        st.error("❌ No se encontraron las credenciales 'SMTP_EMAIL' y 'SMTP_PASSWORD' en Secrets de Streamlit.")
+        return False
+
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_EMISOR
+    msg['To'] = ", ".join(destinatarios)
+    msg['Subject'] = asunto
+
+    msg.attach(MIMEText(cuerpo, 'html'))
+
+    adjunto = MIMEApplication(archivo_bytes, _subtype="xlsx")
+    adjunto.add_header('Content-Disposition', 'attachment', filename=nombre_archivo)
+    msg.attach(adjunto)
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(EMAIL_EMISOR, PASSWORD_EMISOR)
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception as e:
+        st.error(f"❌ Error al enviar el correo: {e}")
+        return False
 
 # --- MENÚ LATERAL DIRECTO ---
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3227/3227840.png", width=70)
@@ -228,7 +263,6 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
         if proyecto_sel:
             df_proyecto = pd.read_sql_query("SELECT * FROM piquetes WHERE tramo = ?", conn, params=(proyecto_sel,))
             
-            # Calcular avance individual por fila
             hitos = ["excavacion", "verticalizado", "montaje_riendas", "tendido", "flechado", "engrampado"]
             peso_por_hito = 100 / len(hitos)
             df_proyecto["Avance_%"] = 0
@@ -236,7 +270,6 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
                 df_proyecto["Avance_%"] += df_proyecto[hito].notna().astype(int) * peso_por_hito
             df_proyecto["Avance_%"] = df_proyecto["Avance_%"].round().astype(int)
 
-            # Resumen / Métricas rápidas
             total_piquetes = len(df_proyecto)
             avance_promedio = int(df_proyecto["Avance_%"].mean()) if total_piquetes > 0 else 0
             completados = len(df_proyecto[df_proyecto["Avance_%"] == 100])
@@ -258,7 +291,6 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
 
             st.dataframe(df_proyecto, use_container_width=True)
 
-            # Botón de descarga CSV
             csv = df_proyecto.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label=f"📥 Descargar datos del proyecto {proyecto_sel} (CSV)",
@@ -614,7 +646,7 @@ else:
         
         columnas_visibles = ["tramo", "piquete", "tipo_estructura", "Avance_%", "anexo_montaje", "red_line"] + hitos
         st.markdown("---")
-        st.markdown("### 📥 Exportar Reportes de Trazabilidad")
+        st.markdown("### 📥 Exportar y Notificar Reportes de Trazabilidad")
         
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
@@ -666,3 +698,35 @@ else:
                 """,
                 height=45
             )
+
+        # --- SECCIÓN DE ENVÍO AUTOMÁTICO DE CORREOS ---
+        st.markdown("---")
+        with st.expander("✉️ Enviar Reporte de Avance por Correo Electrónico"):
+            emails_input = st.text_input("Correos destinatarios (separados por coma):", placeholder="ejemplo@empresa.com, director@empresa.com")
+            
+            if st.button("🚀 Enviar Reporte Ahora", type="primary"):
+                lista_correos = [e.strip() for e in emails_input.split(",") if e.strip()]
+                if not lista_correos:
+                    st.warning("Por favor ingresa al menos un correo válido.")
+                else:
+                    cuerpo_html = f"""
+                    <h2>⚡ Reporte Automático de Control de Obra</h2>
+                    <p>Se adjunta la planilla de trazabilidad actualizada para el frente <b>{tramo_sel}</b>.</p>
+                    <ul>
+                        <li><b>Fecha de Emisión:</b> {datetime.date.today().strftime('%d/%m/%Y')}</li>
+                        <li><b>Avance Físico Consolidado:</b> {int(avance_promedio)}%</li>
+                        <li><b>Ritmo diario:</b> {round(ritmo_diario, 2)}% / día</li>
+                        <li><b>Proyección Fin de Obra:</b> {fin_proyectado.strftime('%d/%m/%Y')}</li>
+                    </ul>
+                    <p><i>Reporte generado por el Panel de Control de Obra.</i></p>
+                    """
+                    
+                    exito = enviar_reporte_correo(
+                        destinatarios=lista_correos,
+                        asunto=f"⚡ Reporte de Obra - Frente {tramo_sel} ({datetime.date.today().strftime('%d/%m/%Y')})",
+                        cuerpo=cuerpo_html,
+                        archivo_bytes=buffer_excel.getvalue(),
+                        nombre_archivo=f"Trazabilidad_{tramo_sel}_{datetime.date.today().strftime('%d_%m_%Y')}.xlsx"
+                    )
+                    if exito:
+                        st.success(f"✔️ ¡Reporte enviado con éxito a: {', '.join(lista_correos)}!")
