@@ -175,53 +175,49 @@ if opcion == "📥 Migración Inicial (Excel)":
                 df_test = pd.read_excel(archivo_excel, nrows=15)
                 skip_rows = 0
                 
+                # Detectar la fila donde inician los encabezados
                 for i, row in df_test.iterrows():
                     valores_fila = [str(val).strip().upper() for val in row.values if pd.notna(val)]
-                    if "TRAMO - TAG" in valores_fila or "PIQUETE" in valores_fila or "ESTRUCTURA" in valores_fila:
+                    if "PIQUETE" in valores_fila or "TIPO ESTRUCTURA" in valores_fila:
                         skip_rows = i + 1
                         break
                 
                 archivo_excel.seek(0)
                 df = pd.read_excel(archivo_excel, skiprows=skip_rows)
-                df.columns = df.columns.str.strip().str.upper()
                 
-                col_piquete_encontrada = None
-                posibles_nombres = ["PIQUETE", "PIQUETES", "NRO PIQUETE", "ESTRUCTURA", "TAG", "COD_PIQUETE"]
-                for col in df.columns:
-                    if col in posibles_nombres:
-                        col_piquete_encontrada = col
-                        break
+                # Normalización de los nombres de columnas
+                df.columns = df.columns.astype(str).str.strip().str.upper()
                 
-                if not col_piquete_encontrada:
-                    st.error(f"❌ No se pudo identificar la columna de Piquetes. Columnas detectadas: {list(df.columns)}")
+                if "PIQUETE" not in df.columns:
+                    st.error(f"❌ No se encontró la columna 'PIQUETE'. Columnas detectadas en el Excel: {list(df.columns)}")
                 else:
-                    df = df.dropna(subset=[col_piquete_encontrada])
+                    df = df.dropna(subset=["PIQUETE"])
                     
                     conn = conectar_db()
                     conn.execute("DELETE FROM piquetes WHERE tramo = ?", (nombre_proyecto_manual,))
                     
                     registros_cargados = 0
                     for _, row in df.iterrows():
-                        piquete_val = str(row.get(col_piquete_encontrada, "")).strip()
+                        piquete_val = str(row.get("PIQUETE", "")).strip()
                         if piquete_val and piquete_val.lower() != "nan" and piquete_val != "":
                             conn.execute("""
-                                INSERT OR REPLACE INTO piquetes (tramo, piquete, tipo_estructura, excavacion, verticalizado, 
-                                                    montaje_riendas, tendido, flechado, engrampado, fecha_montaje,
-                                                    tipo_de_equipo, anexo_montaje, red_line, observacion_ofm)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                INSERT OR REPLACE INTO piquetes (
+                                    tramo, piquete, tipo_estructura, excavacion, verticalizado, 
+                                    tendido, flechado, engrampado, montaje_riendas, fecha_montaje, observacion_ofm
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
-                                nombre_proyecto_manual, piquete_val, str(row.get("TIPO ESTRUCTURA", "S/D")),
+                                nombre_proyecto_manual,
+                                piquete_val,
+                                str(row.get("TIPO ESTRUCTURA", "S/D")),
                                 str(row.get("EXCAV PIQUETES", "")) if pd.notna(row.get("EXCAV PIQUETES")) else None,
                                 str(row.get("VERTICALIZADO", "")) if pd.notna(row.get("VERTICALIZADO")) else None,
-                                str(row.get("MONTAJE RIENDAS", "")) if pd.notna(row.get("MONTAJE RIENDAS")) else None,
-                                str(row.get("TENDIDO", "")) if pd.notna(row.get("TENDIDO")) else None,
+                                str(row.get("TENDIDO DE CONDUCTOR", "")) if pd.notna(row.get("TENDIDO DE CONDUCTOR")) else None,
                                 str(row.get("FLECHADO", "")) if pd.notna(row.get("FLECHADO")) else None,
                                 str(row.get("ENGRAMPADO", "")) if pd.notna(row.get("ENGRAMPADO")) else None,
-                                str(row.get("FECHA DE MONTAJE", "")) if pd.notna(row.get("FECHA DE MONTAJE")) else None,
-                                str(row.get("TIPO DE EQUIPO", "")) if pd.notna(row.get("TIPO DE EQUIPO")) else None,
-                                str(row.get("ANEXO MONTAJE", "")) if pd.notna(row.get("ANEXO MONTAJE")) else None,
-                                str(row.get("RED LINE", "")) if pd.notna(row.get("RED LINE")) else None,
-                                str(row.get("OBSERVACION - OFM", "")) if pd.notna(row.get("OBSERVACION - OFM")) else None
+                                str(row.get("MONTAJE RIENDAS", "")) if pd.notna(row.get("MONTAJE RIENDAS")) else None,
+                                str(row.get("FECHA DE LIBERACION", "")) if pd.notna(row.get("FECHA DE LIBERACION")) else None,
+                                str(row.get("OBSERVACION", "")) if pd.notna(row.get("OBSERVACION")) else None
                             ))
                             registros_cargados += 1
                                 
@@ -230,7 +226,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                     
                     if registros_cargados > 0:
                         st.session_state.proyecto_activo = nombre_proyecto_manual
-                        st.success(f"✔️ ¡Migración exitosa! Se guardaron {registros_cargados} piquetes.")
+                        st.success(f"✔️ ¡Migración exitosa! Se guardaron {registros_cargados} piquetes procesando las columnas requeridas.")
                         st.rerun()
             except Exception as e:
                 st.error(f"❌ Error al procesar el Excel: {e}")
@@ -449,12 +445,12 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 f_vert = st.date_input("2. VERTICALIZADO", value=convertir_a_fecha(p_info["verticalizado"]))
                 f_riendas = st.date_input("3. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
             with col2:
-                f_tendido = st.date_input("4. TENDIDO", value=convertir_a_fecha(p_info["tendido"]))
+                f_tendido = st.date_input("4. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
                 f_flechado = st.date_input("5. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
                 f_engramp = st.date_input("6. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
 
             st.markdown("---")
-            f_montaje = st.date_input("Fecha Montaje Mecánico Final", value=convertir_a_fecha(p_info["fecha_montaje"]))
+            f_montaje = st.date_input("Fecha Montaje / Liberación Final", value=convertir_a_fecha(p_info["fecha_montaje"]))
 
             st.markdown("##### 📥 Carga / Actualización de Documentos Técnicos")
             col_arch1, col_arch2 = st.columns(2)
