@@ -199,8 +199,9 @@ if opcion == "📥 Migración Inicial (Excel)":
                 archivo_excel.seek(0)
                 df = pd.read_excel(archivo_excel, skiprows=skip_rows)
                 
-                # Normalización de los nombres de columnas
+                # Normalizar nombres de columnas y ELIMINAR COLUMNAS DUPLICADAS
                 df.columns = df.columns.astype(str).str.strip().str.upper()
+                df = df.loc[:, ~df.columns.duplicated()]
                 
                 if "PIQUETE" not in df.columns:
                     st.error(f"❌ No se encontró la columna 'PIQUETE'. Columnas detectadas: {list(df.columns)}")
@@ -210,10 +211,18 @@ if opcion == "📥 Migración Inicial (Excel)":
                     conn = conectar_db()
                     conn.execute("DELETE FROM piquetes WHERE tramo = ?", (nombre_proyecto_manual,))
                     
+                    def get_val(row, col_name):
+                        val = row.get(col_name)
+                        if isinstance(val, pd.Series):
+                            val = val.iloc[0]
+                        if pd.isna(val) or str(val).strip().lower() in ["nan", "none", "", "nat"]:
+                            return None
+                        return str(val).strip()
+
                     registros_cargados = 0
                     for _, row in df.iterrows():
-                        piquete_val = str(row.get("PIQUETE", "")).strip()
-                        if piquete_val and piquete_val.lower() != "nan" and piquete_val != "":
+                        piquete_val = get_val(row, "PIQUETE")
+                        if piquete_val:
                             conn.execute("""
                                 INSERT OR REPLACE INTO piquetes (
                                     tramo, piquete, tipo_estructura, longitud_poste, excavacion, verticalizado, 
@@ -223,17 +232,17 @@ if opcion == "📥 Migración Inicial (Excel)":
                             """, (
                                 nombre_proyecto_manual,
                                 piquete_val,
-                                str(row.get("TIPO ESTRUCTURA", "S/D")),
-                                str(row.get("LONGITUD POSTE", "")) if pd.notna(row.get("LONGITUD POSTE")) else None,
-                                str(row.get("EXCAV PIQUETES", "")) if pd.notna(row.get("EXCAV PIQUETES")) else None,
-                                str(row.get("VERTICALIZADO", "")) if pd.notna(row.get("VERTICALIZADO")) else None,
-                                str(row.get("TENDIDO DE CONDUCTOR", "")) if pd.notna(row.get("TENDIDO DE CONDUCTOR")) else None,
-                                str(row.get("FLECHADO", "")) if pd.notna(row.get("FLECHADO")) else None,
-                                str(row.get("ENGRAMPADO", "")) if pd.notna(row.get("ENGRAMPADO")) else None,
-                                str(row.get("MONTAJE DE AISLADOR", "")) if pd.notna(row.get("MONTAJE DE AISLADOR")) else None,
-                                str(row.get("MONTAJE RIENDAS", "")) if pd.notna(row.get("MONTAJE RIENDAS")) else None,
-                                str(row.get("FECHA DE LIBERACION", "")) if pd.notna(row.get("FECHA DE LIBERACION")) else None,
-                                str(row.get("OBSERVACION", "")) if pd.notna(row.get("OBSERVACION")) else None
+                                get_val(row, "TIPO ESTRUCTURA") or "S/D",
+                                get_val(row, "LONGITUD POSTE"),
+                                get_val(row, "EXCAV PIQUETES"),
+                                get_val(row, "VERTICALIZADO"),
+                                get_val(row, "TENDIDO DE CONDUCTOR"),
+                                get_val(row, "FLECHADO"),
+                                get_val(row, "ENGRAMPADO"),
+                                get_val(row, "MONTAJE DE AISLADOR"),
+                                get_val(row, "MONTAJE RIENDAS"),
+                                get_val(row, "FECHA DE LIBERACION"),
+                                get_val(row, "OBSERVACION")
                             ))
                             registros_cargados += 1
                                 
