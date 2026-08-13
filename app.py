@@ -610,13 +610,10 @@ else:
         total_excavados = df_tramo["excavacion"].notna().sum() if not df_tramo.empty else 0
         total_verticalizados = df_tramo["verticalizado"].notna().sum() if not df_tramo.empty else 0
         total_tendidos = df_tramo["tendido"].notna().sum() if not df_tramo.empty else 0
+
+        # --- TARJETAS SUPERIORES (KPIS) ---
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         
-        tot_aisladores_tramo = df_tramo["cantidad_aisladores"].fillna(3).sum()
-        aisladores_instalados_tramo = df_tramo[df_tramo["montaje_aislador"].notna()]["cantidad_aisladores"].fillna(3).sum()
-
-        descalce_civil_montaje = max(0, total_excavados - total_verticalizados)
-
-        kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
         with kpi1:
             st.markdown(f"""
                 <div class='kpi-card' style='border-left-color: #3b82f6;'>
@@ -625,17 +622,8 @@ else:
                     <div class='kpi-delta' style='color: #a7f3d0;'>⚡ Eficiencia: {round(ritmo_diario, 2)}% / día</div>
                 </div>
             """, unsafe_allow_html=True)
-            
-        with kpi2:
-            st.markdown(f"""
-                <div class='kpi-card' style='border-left-color: #8b5cf6;'>
-                    <div class='kpi-title'>Aisladores Instalados</div>
-                    <div class='kpi-value'>{int(aisladores_instalados_tramo)} <span style='font-size:14px;color:#9ca3af;'>/ {int(tot_aisladores_tramo)}</span></div>
-                    <div class='kpi-delta' style='color: #a7f3d0;'>{int((aisladores_instalados_tramo/tot_aisladores_tramo)*100) if tot_aisladores_tramo>0 else 0}% del total</div>
-                </div>
-            """, unsafe_allow_html=True)
 
-        with kpi3:
+        with kpi2:
             st.markdown(f"""
                 <div class='kpi-card' style='border-left-color: #10b981;'>
                     <div class='kpi-title'>Productividad de Obra</div>
@@ -644,7 +632,7 @@ else:
                 </div>
             """, unsafe_allow_html=True)
             
-        with kpi4:
+        with kpi3:
             color_desv = "#f87171" if desviacion_dias > 0 else "#34d399"
             txt_desv = f"+ {desviacion_dias} días de retraso" if desviacion_dias > 0 else f"{abs(desviacion_dias)} días adelantado"
             st.markdown(f"""
@@ -655,7 +643,7 @@ else:
                 </div>
             """, unsafe_allow_html=True)
             
-        with kpi5:
+        with kpi4:
             st.markdown(f"""
                 <div class='kpi-card' style='border-left-color: #f59e0b;'>
                     <div class='kpi-title'>Proyección de Cierre Real</div>
@@ -664,15 +652,36 @@ else:
                 </div>
             """, unsafe_allow_html=True)
 
+        # --- DIAGNÓSTICO RESTRICCIONES Y META DE PIQUETES ---
         st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:20px;'>⚠️ Diagnóstico Operativo de Flujo</h3>", unsafe_allow_html=True)
+        
+        # CÁLCULOS DÍAS Y META DE PIQUETES FINALIZADOS
+        dias_restantes = (entrega_base - hoy).days
+        total_piquetes_tramo = len(df_tramo)
+        piquetes_completados_100 = len(df_tramo[df_tramo["Avance_%"] == 100])
+        piquetes_pendientes = max(0, total_piquetes_tramo - piquetes_completados_100)
+        
+        if piquetes_pendientes == 0:
+            alerta_color = "#10b981"
+            txt_meta = "0 piquetes"
+            txt_sub = "¡Frente 100% finalizado!"
+        elif dias_restantes <= 0:
+            alerta_color = "#ef4444"
+            txt_meta = f"{piquetes_pendientes} piquetes"
+            txt_sub = "⚠️ Plazo contractual vencido. Finalizar urgente."
+        else:
+            ritmo_requerido_piquetes = round(piquetes_pendientes / dias_restantes, 2)
+            alerta_color = "#ef4444" if ritmo_requerido_piquetes > 2.0 else "#f59e0b"
+            txt_meta = f"{ritmo_requerido_piquetes} piquetes/día"
+            txt_sub = f"Faltan {piquetes_pendientes} piquetes 100% en {dias_restantes} días rest."
+
         col_bot1, col_bot2 = st.columns([1, 2])
         with col_bot1:
-            color_alerta_bot = "#ef4444" if descalce_civil_montaje > 5 else "#f59e0b" if descalce_civil_montaje > 0 else "#10b981"
             st.markdown(f"""
-                <div class='kpi-card' style='border-left-color: {color_alerta_bot}; background: #1e2230;'>
-                    <div class='kpi-title' style='color: #ef4444;'>🚨 Cuello de Botella: Civil vs Izado</div>
-                    <div class='kpi-value' style='color: {color_alerta_bot};'>{descalce_civil_montaje} <span style='font-size:14px;color:#9ca3af;'>piquetes</span></div>
-                    <div class='kpi-delta' style='color: #9ca3af;'>Pozos excavados esperando estructura.</div>
+                <div class='kpi-card' style='border-left-color: {alerta_color}; background: #1e2230;'>
+                    <div class='kpi-title' style='color: {alerta_color};'>🎯 Meta para Cumplir Plazo</div>
+                    <div class='kpi-value' style='color: {alerta_color}; font-size:24px;'>{txt_meta}</div>
+                    <div class='kpi-delta' style='color: #9ca3af;'>{txt_sub}</div>
                 </div>
             """, unsafe_allow_html=True)
         
@@ -773,8 +782,7 @@ else:
                     <ul>
                         <li><b>Fecha de Emisión:</b> {datetime.date.today().strftime('%d/%m/%Y')}</li>
                         <li><b>Avance Físico Consolidado:</b> {int(avance_promedio)}%</li>
-                        <li><b>Aisladores Montados:</b> {int(aisladores_instalados_tramo)} de {int(tot_aisladores_tramo)}</li>
-                        <li><b>Ritmo diario:</b> {round(ritmo_diario, 2)}% / día</li>
+                        <li><b>Meta Requerida:</b> {txt_meta} ({txt_sub})</li>
                         <li><b>Proyección Fin de Obra:</b> {fin_proyectado.strftime('%d/%m/%Y')}</li>
                     </ul>
                     <p><i>Reporte generado por el Panel de Control de Obra.</i></p>
@@ -782,7 +790,7 @@ else:
                     
                     exito = enviar_reporte_correo(
                         destinatarios=lista_correos,
-                        asunto=f"⚡ Reporte de Obra - Frente {tramo_sel} ({datetime.date.today().strftime('%d/%m/%Y')})",
+                        asunto=f"⚡ Reporte de Obra - Frente {tramo_sel} ({datetime.date.today().strftime('%d_%m_%Y')})",
                         cuerpo=cuerpo_html,
                         archivo_bytes=buffer_excel.getvalue(),
                         nombre_archivo=f"Trazabilidad_{tramo_sel}_{datetime.date.today().strftime('%d_%m_%Y')}.xlsx"
