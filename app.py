@@ -111,7 +111,8 @@ def inicializar_db():
     cursor.execute("PRAGMA table_info(piquetes)")
     columnas = [col[1] for col in cursor.fetchall()]
     
-    if len(columnas) > 0 and "tipo_de_equipo" not in columnas:
+    # Recrea la tabla si faltan columnas de tu estructura de Excel
+    if len(columnas) > 0 and ("longitud_poste" not in columnas or "montaje_aislador" not in columnas):
         conn.close()
         try: os.remove(DB_NAME)
         except: pass
@@ -124,12 +125,14 @@ def inicializar_db():
             tramo TEXT,
             piquete TEXT UNIQUE,
             tipo_estructura TEXT,
+            longitud_poste TEXT,
             excavacion TEXT,
             verticalizado TEXT,
-            montaje_riendas TEXT,
             tendido TEXT,
             flechado TEXT,
             engrampado TEXT,
+            montaje_aislador TEXT,
+            montaje_riendas TEXT,
             fecha_montaje TEXT,
             tipo_de_equipo TEXT,
             anexo_montaje TEXT,
@@ -148,6 +151,17 @@ def inicializar_db():
     conn.close()
 
 inicializar_db()
+
+# Lista general de hitos para cálculo de avance
+HITOS_OBRA = [
+    "excavacion", 
+    "verticalizado", 
+    "montaje_riendas", 
+    "montaje_aislador", 
+    "tendido", 
+    "flechado", 
+    "engrampado"
+]
 
 # CARPETA PARA DOCUMENTOS ADJUNTOS
 CARPA_ARCHIVOS = "archivos_obra"
@@ -179,7 +193,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                 for i, row in df_test.iterrows():
                     valores_fila = [str(val).strip().upper() for val in row.values if pd.notna(val)]
                     if "PIQUETE" in valores_fila or "TIPO ESTRUCTURA" in valores_fila:
-                        skip_rows = i + 1
+                        skip_rows = i
                         break
                 
                 archivo_excel.seek(0)
@@ -189,7 +203,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                 df.columns = df.columns.astype(str).str.strip().str.upper()
                 
                 if "PIQUETE" not in df.columns:
-                    st.error(f"❌ No se encontró la columna 'PIQUETE'. Columnas detectadas en el Excel: {list(df.columns)}")
+                    st.error(f"❌ No se encontró la columna 'PIQUETE'. Columnas detectadas: {list(df.columns)}")
                 else:
                     df = df.dropna(subset=["PIQUETE"])
                     
@@ -202,19 +216,21 @@ if opcion == "📥 Migración Inicial (Excel)":
                         if piquete_val and piquete_val.lower() != "nan" and piquete_val != "":
                             conn.execute("""
                                 INSERT OR REPLACE INTO piquetes (
-                                    tramo, piquete, tipo_estructura, excavacion, verticalizado, 
-                                    tendido, flechado, engrampado, montaje_riendas, fecha_montaje, observacion_ofm
+                                    tramo, piquete, tipo_estructura, longitud_poste, excavacion, verticalizado, 
+                                    tendido, flechado, engrampado, montaje_aislador, montaje_riendas, fecha_montaje, observacion_ofm
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 nombre_proyecto_manual,
                                 piquete_val,
                                 str(row.get("TIPO ESTRUCTURA", "S/D")),
+                                str(row.get("LONGITUD POSTE", "")) if pd.notna(row.get("LONGITUD POSTE")) else None,
                                 str(row.get("EXCAV PIQUETES", "")) if pd.notna(row.get("EXCAV PIQUETES")) else None,
                                 str(row.get("VERTICALIZADO", "")) if pd.notna(row.get("VERTICALIZADO")) else None,
                                 str(row.get("TENDIDO DE CONDUCTOR", "")) if pd.notna(row.get("TENDIDO DE CONDUCTOR")) else None,
                                 str(row.get("FLECHADO", "")) if pd.notna(row.get("FLECHADO")) else None,
                                 str(row.get("ENGRAMPADO", "")) if pd.notna(row.get("ENGRAMPADO")) else None,
+                                str(row.get("MONTAJE DE AISLADOR", "")) if pd.notna(row.get("MONTAJE DE AISLADOR")) else None,
                                 str(row.get("MONTAJE RIENDAS", "")) if pd.notna(row.get("MONTAJE RIENDAS")) else None,
                                 str(row.get("FECHA DE LIBERACION", "")) if pd.notna(row.get("FECHA DE LIBERACION")) else None,
                                 str(row.get("OBSERVACION", "")) if pd.notna(row.get("OBSERVACION")) else None
@@ -226,7 +242,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                     
                     if registros_cargados > 0:
                         st.session_state.proyecto_activo = nombre_proyecto_manual
-                        st.success(f"✔️ ¡Migración exitosa! Se guardaron {registros_cargados} piquetes procesando las columnas requeridas.")
+                        st.success(f"✔️ ¡Migración exitosa! Se procesaron y guardaron {registros_cargados} piquetes.")
                         st.rerun()
             except Exception as e:
                 st.error(f"❌ Error al procesar el Excel: {e}")
@@ -259,10 +275,9 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
         if proyecto_sel:
             df_proyecto = pd.read_sql_query("SELECT * FROM piquetes WHERE tramo = ?", conn, params=(proyecto_sel,))
             
-            hitos = ["excavacion", "verticalizado", "montaje_riendas", "tendido", "flechado", "engrampado"]
-            peso_por_hito = 100 / len(hitos)
+            peso_por_hito = 100 / len(HITOS_OBRA)
             df_proyecto["Avance_%"] = 0
-            for hito in hitos:
+            for hito in HITOS_OBRA:
                 df_proyecto["Avance_%"] += df_proyecto[hito].notna().astype(int) * peso_por_hito
             df_proyecto["Avance_%"] = df_proyecto["Avance_%"].round().astype(int)
 
@@ -310,10 +325,9 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
     if df_obra.empty:
         st.info("No hay datos cargados en el sistema de control.")
     else:
-        hitos = ["excavacion", "verticalizado", "montaje_riendas", "tendido", "flechado", "engrampado"]
-        peso_por_hito = 100 / len(hitos)
+        peso_por_hito = 100 / len(HITOS_OBRA)
         df_obra["Avance_%"] = 0
-        for hito in hitos:
+        for hito in HITOS_OBRA:
             df_obra["Avance_%"] += df_obra[hito].notna().astype(int) * peso_por_hito
         df_obra["Avance_%"] = df_obra["Avance_%"].round().astype(int)
 
@@ -341,6 +355,7 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         columnas_analizar = {
             "piquete": "📍 Nombre / Código de Piquete",
             "tipo_estructura": "🏗️ Tipos de Estructura",
+            "longitud_poste": "📏 Longitud de Poste",
             "tipo_de_equipo": "⚙️ Equipos de Maniobra",
             "Avance_%": "📈 Porcentaje de Avance Individual"
         }
@@ -376,7 +391,7 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
                 st.plotly_chart(fig_donut, width='stretch')
                 
         with st.expander("🔍 Ver Listado Detallado de este Frente"):
-            st.dataframe(df_inv[["piquete", "tipo_estructura", "tipo_de_equipo", "Avance_%"]], width='stretch')
+            st.dataframe(df_inv[["piquete", "tipo_estructura", "longitud_poste", "tipo_de_equipo", "Avance_%"]], width='stretch')
 
 # -------------------------------------------------------------------------
 # MÓDULO 4: CARGA Y GESTIÓN DE CAMPO
@@ -405,8 +420,8 @@ elif opcion == "📝 Carga y Gestión de Campo":
         p_info = pd.read_sql_query("SELECT * FROM piquetes WHERE piquete = ?", conn, params=[piquete_sel]).iloc[0]
         conn.close()
         
-        eq_excel = p_info["tipo_de_equipo"] if p_info["tipo_de_equipo"] and p_info["tipo_de_equipo"] != "None" else "No especificado en Excel"
-        st.info(f"⚙️ **TIPO DE EQUIPO (Importado del Excel):** {eq_excel}")
+        l_poste = p_info["longitud_poste"] if p_info["longitud_poste"] and p_info["longitud_poste"] != "None" else "N/A"
+        st.info(f"📏 **LONGITUD DE POSTE:** {l_poste} | 🏗️ **TIPO ESTRUCTURA:** {p_info['tipo_estructura']}")
         
         st.markdown("### 📂 Documentación Actualizada del Piquete")
         col_dl1, col_dl2 = st.columns(2)
@@ -444,10 +459,11 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 f_excav = st.date_input("1. EXCAV PIQUETES", value=convertir_a_fecha(p_info["excavacion"]))
                 f_vert = st.date_input("2. VERTICALIZADO", value=convertir_a_fecha(p_info["verticalizado"]))
                 f_riendas = st.date_input("3. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
+                f_aislador = st.date_input("4. MONTAJE DE AISLADOR", value=convertir_a_fecha(p_info["montaje_aislador"]))
             with col2:
-                f_tendido = st.date_input("4. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
-                f_flechado = st.date_input("5. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
-                f_engramp = st.date_input("6. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
+                f_tendido = st.date_input("5. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
+                f_flechado = st.date_input("6. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
+                f_engramp = st.date_input("7. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
 
             st.markdown("---")
             f_montaje = st.date_input("Fecha Montaje / Liberación Final", value=convertir_a_fecha(p_info["fecha_montaje"]))
@@ -475,11 +491,12 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
                 conn = conectar_db()
                 conn.execute("""
-                    UPDATE piquetes SET excavacion=?, verticalizado=?, montaje_riendas=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
+                    UPDATE piquetes SET excavacion=?, verticalizado=?, montaje_riendas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
                     WHERE piquete=?
                 """, (str(f_excav) if f_excav else None, str(f_vert) if f_vert else None, str(f_riendas) if f_riendas else None,
-                      str(f_tendido) if f_tendido else None, str(f_flechado) if f_flechado else None, str(f_engramp) if f_engramp else None,
-                      str(f_montaje) if f_montaje else None, str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, piquete_sel))
+                      str(f_aislador) if f_aislador else None, str(f_tendido) if f_tendido else None, str(f_flechado) if f_flechado else None, 
+                      str(f_engramp) if f_engramp else None, str(f_montaje) if f_montaje else None, 
+                      str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, piquete_sel))
                 conn.commit()
                 conn.close()
                 
@@ -499,13 +516,12 @@ else:
     if df_obra.empty:
         st.info("No existen registros de obra para procesar analíticas. Vaya al módulo de Migración.")
     else:
-        hitos = ["excavacion", "verticalizado", "montaje_riendas", "tendido", "flechado", "engrampado"]
-        for hito in hitos:
+        for hito in HITOS_OBRA:
             df_obra[hito] = pd.to_datetime(df_obra[hito], errors='coerce')
             
-        peso_por_hito = 100 / len(hitos)
+        peso_por_hito = 100 / len(HITOS_OBRA)
         df_obra["Avance_%"] = 0
-        for hito in hitos:
+        for hito in HITOS_OBRA:
             df_obra["Avance_%"] += df_obra[hito].notna().astype(int) * peso_por_hito
         df_obra["Avance_%"] = df_obra["Avance_%"].round().astype(int)
 
@@ -554,7 +570,7 @@ else:
             fin_proyectado = inicio_base + pd.Timedelta(days=dias_proyectados_totales)
             desviacion_dias = (fin_proyectado - entrega_base).days
         
-        hitos_completados = sum(df_tramo[hito].notna().sum() for hito in hitos) if not df_tramo.empty else 0
+        hitos_completados = sum(df_tramo[hito].notna().sum() for hito in HITOS_OBRA) if not df_tramo.empty else 0
         productividad_media = round(hitos_completados / dias_transcurridos, 2)
 
         total_excavados = df_tramo["excavacion"].notna().sum() if not df_tramo.empty else 0
@@ -616,7 +632,7 @@ else:
         
         with col_bot2:
             df_frentes = pd.DataFrame({
-                "Frente Operativo": ["1. Excavación", "2. Verticalizado", "4. Tendido"],
+                "Frente Operativo": ["1. Excavación", "2. Verticalizado", "5. Tendido"],
                 "Piquetes Completados": [total_excavados, total_verticalizados, total_tendidos]
             })
             fig_frentes = px.bar(df_frentes, x="Piquetes Completados", y="Frente Operativo", orientation='h',
@@ -637,10 +653,10 @@ else:
 
         st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:20px;'>📋 Matriz Completa de Trazabilidad</h3>", unsafe_allow_html=True)
         df_mostrar = df_tramo.copy()
-        for hito in hitos:
+        for hito in HITOS_OBRA:
             df_mostrar[hito] = df_mostrar[hito].dt.strftime('%d/%m/%Y').fillna("-")
         
-        columnas_visibles = ["tramo", "piquete", "tipo_estructura", "Avance_%", "anexo_montaje", "red_line"] + hitos
+        columnas_visibles = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "Avance_%", "anexo_montaje", "red_line"] + HITOS_OBRA
         st.markdown("---")
         st.markdown("### 📥 Exportar y Notificar Reportes de Trazabilidad")
         
