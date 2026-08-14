@@ -287,7 +287,8 @@ if opcion == "📥 Migración Inicial (Excel)":
                         if piquete_val:
                             cant_aisl = get_val(row, "CANTIDAD AISLADORES", "CANT_AISLADORES", "AISLADORES")
                             try:
-                                cant_aisl = int(float(cant_aisl)) if cant_aisl else 3
+                                # Respetar explícitamente el 0 y solo asignar 3 a valores vacíos/nulos
+                                cant_aisl = int(float(cant_aisl)) if cant_aisl is not None else 3
                             except:
                                 cant_aisl = 3
 
@@ -390,8 +391,9 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
             avance_promedio = int(df_proyecto["Avance_%"].mean()) if total_piquetes > 0 else 0
             completados = len(df_proyecto[df_proyecto["Avance_%"] >= 99.9])
 
-            total_aisladores = df_proyecto["cantidad_aisladores"].fillna(3).sum()
-            aisladores_instalados = df_proyecto[df_proyecto["montaje_aislador"].notna()]["cantidad_aisladores"].fillna(3).sum()
+            # Manejo estricto para respetar el valor 0 de aisladores
+            total_aisladores = pd.to_numeric(df_proyecto["cantidad_aisladores"], errors='coerce').fillna(3).sum()
+            aisladores_instalados = pd.to_numeric(df_proyecto[df_proyecto["montaje_aislador"].notna()]["cantidad_aisladores"], errors='coerce').fillna(3).sum()
 
             total_metros = df_proyecto["metros_tendido"].fillna(0).sum()
             metros_tendidos = df_proyecto[df_proyecto["tendido"].notna()]["metros_tendido"].fillna(0).sum()
@@ -445,7 +447,6 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
                 label=f"📥 Descargar datos del proyecto {proyecto_sel} (CSV)",
                 data=csv,
                 file_name=f"reporte_{proyecto_sel}.csv",
-                mime="text/csv",
             )
 
     conn.close()
@@ -479,8 +480,8 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         df_inv = df_obra[df_obra["tramo"] == tramo_sel].copy()
         
         total_piquetes_frente = len(df_inv)
-        total_aisladores_frente = df_inv["cantidad_aisladores"].fillna(3).sum()
-        aisladores_colocados_frente = df_inv[df_inv["montaje_aislador"].notna()]["cantidad_aisladores"].fillna(3).sum()
+        total_aisladores_frente = pd.to_numeric(df_inv["cantidad_aisladores"], errors='coerce').fillna(3).sum()
+        aisladores_colocados_frente = pd.to_numeric(df_inv[df_inv["montaje_aislador"].notna()]["cantidad_aisladores"], errors='coerce').fillna(3).sum()
         
         total_m_frente = df_inv["metros_tendido"].fillna(0).sum()
         m_colocados_frente = df_inv[df_inv["tendido"].notna()]["metros_tendido"].fillna(0).sum()
@@ -615,7 +616,8 @@ elif opcion == "📝 Carga y Gestión de Campo":
             
             c_aisl1, c_aisl2, c_aisl3 = st.columns(3)
             with c_aisl1:
-                cant_aisladores_input = st.number_input("🔌 Cantidad de Aisladores:", min_value=1, max_value=20, value=cant_aisl_actual)
+                # Se permite min_value=0 para dar soporte a piquetes con 0 aisladores
+                cant_aisladores_input = st.number_input("🔌 Cantidad de Aisladores:", min_value=0, max_value=20, value=cant_aisl_actual)
             with c_aisl2:
                 metros_tendido_input = st.number_input("📏 Metros de Tendido / Vano (m):", min_value=0.0, step=1.0, value=metros_tendido_actual, format="%.2f")
             with c_aisl3:
