@@ -611,7 +611,7 @@ else:
         total_verticalizados = df_tramo["verticalizado"].notna().sum() if not df_tramo.empty else 0
         total_tendidos = df_tramo["tendido"].notna().sum() if not df_tramo.empty else 0
 
-        # --- TARJETAS SUPERIORES (KPIS) ---
+        # --- TARJETAS KPIS SUPERIORES ---
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         
         with kpi1:
@@ -652,11 +652,10 @@ else:
                 </div>
             """, unsafe_allow_html=True)
 
-        # --- DIAGNÓSTICO RESTRICCIONES Y META DE PIQUETES ---
+        # --- DIAGNÓSTICO OPERATIVO DE METAS ---
         st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:20px;'>⚠️ Diagnóstico Operativo de Flujo</h3>", unsafe_allow_html=True)
         
-        # CÁLCULOS DÍAS Y META DE PIQUETES FINALIZADOS
-        dias_restantes = (entrega_base - hoy).days
+        dias_restantes = max(0, (entrega_base - hoy).days)
         total_piquetes_tramo = len(df_tramo)
         piquetes_completados_100 = len(df_tramo[df_tramo["Avance_%"] == 100])
         piquetes_pendientes = max(0, total_piquetes_tramo - piquetes_completados_100)
@@ -665,15 +664,17 @@ else:
             alerta_color = "#10b981"
             txt_meta = "0 piquetes"
             txt_sub = "¡Frente 100% finalizado!"
+            ritmo_requerido_piquetes = 0.0
         elif dias_restantes <= 0:
             alerta_color = "#ef4444"
             txt_meta = f"{piquetes_pendientes} piquetes"
-            txt_sub = "⚠️ Plazo contractual vencido. Finalizar urgente."
+            txt_sub = "⚠️ Plazo contractual vencido."
+            ritmo_requerido_piquetes = 999.0
         else:
             ritmo_requerido_piquetes = round(piquetes_pendientes / dias_restantes, 2)
             alerta_color = "#ef4444" if ritmo_requerido_piquetes > 2.0 else "#f59e0b"
             txt_meta = f"{ritmo_requerido_piquetes} piquetes/día"
-            txt_sub = f"Faltan {piquetes_pendientes} piquetes 100% en {dias_restantes} días rest."
+            txt_sub = f"Faltan {piquetes_pendientes} piquetes en {dias_restantes} días rest."
 
         col_bot1, col_bot2 = st.columns([1, 2])
         with col_bot1:
@@ -695,6 +696,60 @@ else:
             fig_frentes.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=140, showlegend=False, coloraxis_showscale=False)
             st.plotly_chart(fig_frentes, use_container_width=True)
 
+        # --- PROYECCIÓN BASADA EN RITMO REAL DE CARGA DIARIA ---
+        st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:25px;'>📈 Proyección de Cumplimiento por Ritmo Real de Campo</h3>", unsafe_allow_html=True)
+
+        df_historico = df_tramo[df_tramo["Avance_%"] == 100].copy()
+        df_historico["fecha_montaje"] = pd.to_datetime(df_historico["fecha_montaje"], errors='coerce')
+        df_historico = df_historico.dropna(subset=["fecha_montaje"]).sort_values("fecha_montaje")
+
+        col_sl1, col_sl2 = st.columns([2, 1])
+        with col_sl1:
+            dias_evaluacion = st.slider("Evaluación de ritmo reciente (días):", min_value=7, max_value=30, value=14, step=7)
+
+        fecha_limite_eval = hoy - pd.Timedelta(days=dias_evaluacion)
+        completados_recientes = len(df_historico[df_historico["fecha_montaje"] >= fecha_limite_eval])
+        ritmo_real_diario = round(completados_recientes / dias_evaluacion, 2)
+
+        fechas_futuras = [hoy + pd.Timedelta(days=i) for i in range(dias_restantes + 1)]
+
+        incremento_meta = (total_piquetes_tramo - piquetes_completados_100) / dias_restantes if dias_restantes > 0 else 0
+        curva_meta = [min(total_piquetes_tramo, piquetes_completados_100 + (incremento_meta * i)) for i in range(dias_restantes + 1)]
+        curva_real = [min(total_piquetes_tramo, piquetes_completados_100 + (ritmo_real_diario * i)) for i in range(dias_restantes + 1)]
+
+        df_proyeccion = pd.DataFrame({
+            "Fecha": fechas_futuras + fechas_futuras,
+            "Piquetes Finalizados": curva_meta + curva_real,
+            "Trayectoria": ["Meta Necesaria (Contrato)"] * len(fechas_futuras) + [f"Tendencia Real ({ritmo_real_diario} piq/día)"] * len(fechas_futuras)
+        })
+
+        fig_proy = px.line(
+            df_proyeccion, 
+            x="Fecha", 
+            y="Piquetes Finalizados", 
+            color="Trayectoria",
+            color_discrete_map={
+                "Meta Necesaria (Contrato)": "#10b981", 
+                f"Tendencia Real ({ritmo_real_diario} piq/día)": "#ef4444" if ritmo_real_diario < ritmo_requerido_piquetes else "#3b82f6"
+            }
+        )
+        
+        fig_proy.add_hline(y=total_piquetes_tramo, line_dash="dash", line_color="#9ca3af", annotation_text=f"Total Objetivo: {total_piquetes_tramo} piq.")
+        fig_proy.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=320)
+        st.plotly_chart(fig_proy, use_container_width=True)
+
+        col_summary1, col_summary2 = st.columns(2)
+        with col_summary1:
+            st.info(f"📊 **Ritmo Promedio Reciente ({dias_evaluacion} días):** `{ritmo_real_diario} piquetes/día` ({completados_recientes} piquetes listos)")
+        with col_summary2:
+            if ritmo_real_diario >= ritmo_requerido_piquetes:
+                st.success(f"✅ **Proyección Cierre:** Manteniendo este ritmo, se alcanza la meta antes del `{entrega_base.strftime('%d/%m/%Y')}`.")
+            else:
+                dias_necesarios_extra = int((total_piquetes_tramo - piquetes_completados_100) / ritmo_real_diario) if ritmo_real_diario > 0 else 999
+                fecha_est_cierre = hoy + pd.Timedelta(days=dias_necesarios_extra)
+                st.error(f"🚨 **Proyección Cierre:** Al ritmo actual se finalizará el `{fecha_est_cierre.strftime('%d/%m/%Y')}`. Se requiere aumentar **+{round(ritmo_requerido_piquetes - ritmo_real_diario, 2)} piq/día**.")
+
+        # --- SIMULACIÓN DE PLAZO CONTRACTUAL (GANTT) ---
         st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:20px;'>📊 Simulación de Plazo Contractual vs Proyección de Ritmo Actual</h3>", unsafe_allow_html=True)
         df_gantt = pd.DataFrame([
             {"Línea de Tiempo": "Plazo Comprometido por Contrato", "Inicio": inicio_base, "Fin": entrega_base, "Condición": "Contrato Base"},
@@ -706,6 +761,7 @@ else:
         fig.update_layout(margin=dict(l=20, r=20, t=10, b=20), height=180)
         st.plotly_chart(fig, use_container_width=True)
 
+        # --- MATRIZ COMPLETA Y REPORTE ---
         st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:20px;'>📋 Matriz Completa de Trazabilidad</h3>", unsafe_allow_html=True)
         df_mostrar = df_tramo.copy()
         for hito in HITOS_OBRA:
@@ -766,7 +822,7 @@ else:
                 height=45
             )
 
-        # --- SECCIÓN DE ENVÍO AUTOMÁTICO DE CORREOS ---
+        # --- ENVÍO DE CORREO ---
         st.markdown("---")
         with st.expander("✉️ Enviar Reporte de Avance por Correo Electrónico"):
             emails_input = st.text_input("Correos destinatarios (separados por coma):", placeholder="ejemplo@empresa.com, director@empresa.com")
@@ -783,6 +839,7 @@ else:
                         <li><b>Fecha de Emisión:</b> {datetime.date.today().strftime('%d/%m/%Y')}</li>
                         <li><b>Avance Físico Consolidado:</b> {int(avance_promedio)}%</li>
                         <li><b>Meta Requerida:</b> {txt_meta} ({txt_sub})</li>
+                        <li><b>Ritmo Real Actual:</b> {ritmo_real_diario} piquetes/día</li>
                         <li><b>Proyección Fin de Obra:</b> {fin_proyectado.strftime('%d/%m/%Y')}</li>
                     </ul>
                     <p><i>Reporte generado por el Panel de Control de Obra.</i></p>
