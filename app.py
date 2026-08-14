@@ -118,8 +118,10 @@ def inicializar_db():
     
     if len(columnas) > 0 and "cantidad_aisladores" not in columnas:
         conn.close()
-        try: os.remove(DB_NAME)
-        except: pass
+        try: 
+            os.remove(DB_NAME)
+        except: 
+            pass
         conn = conectar_db()
         cursor = conn.cursor()
 
@@ -477,8 +479,10 @@ elif opcion == "📝 Carga y Gestión de Campo":
         with st.form("form_trazabilidad_avanzado"):
             def convertir_a_fecha(val):
                 if val and val != "None" and val != "-" and val != "":
-                    try: return pd.to_datetime(val).date()
-                    except: return None
+                    try: 
+                        return pd.to_datetime(val).date()
+                    except: 
+                        return None
                 return None
 
             st.markdown("##### ⚙️ Configuración y Cronograma de Hitos")
@@ -574,8 +578,10 @@ else:
 
         with st.expander("⚙️ Ajustes Contractuales Avanzados de Plazos"):
             col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
-            with col_f1: f_inicio = st.date_input("Fecha Inicio Contractual", val_ini, key=f"i_{tramo_sel}")
-            with col_f2: f_entrega = st.date_input("Fecha Fin de Obra", val_ent, key=f"e_{tramo_sel}")
+            with col_f1: 
+                f_inicio = st.date_input("Fecha Inicio Contractual", val_ini, key=f"i_{tramo_sel}")
+            with col_f2: 
+                f_entrega = st.date_input("Fecha Fin de Obra", val_ent, key=f"e_{tramo_sel}")
             with col_f3:
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("Fijar Parámetros"):
@@ -788,7 +794,7 @@ else:
             )
             
         with col_exp2:
-            st.markdown(
+            components.html(
                 """
                 <style>
                 .btn-print {
@@ -812,11 +818,6 @@ else:
                     border-color: #6b7280;
                 }
                 </style>
-                """, unsafe_allow_html=True
-            )
-            
-            components.html(
-                """
                 <button class="btn-print" onclick="window.parent.print()">📄 Guardar Reporte / KPIs (PDF)</button>
                 """,
                 height=45
