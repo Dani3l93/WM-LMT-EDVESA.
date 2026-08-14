@@ -31,6 +31,22 @@ HITOS_OBRA = [
     "engrampado"
 ]
 
+# --- FUNCIÓN AUXILIAR PARA NORMALIZAR FECHAS AL CARGAR EXCEL ---
+def normalizar_fecha(val):
+    if pd.isna(val) or val is None:
+        return None
+    val_str = str(val).strip()
+    if val_str.lower() in ["nan", "none", "", "nat", "-"]:
+        return None
+    try:
+        # Intenta parsear la fecha y devolverla en formato ISO (YYYY-MM-DD)
+        dt = pd.to_datetime(val_str, dayfirst=True, errors='coerce')
+        if pd.notna(dt):
+            return dt.strftime('%Y-%m-%d')
+    except Exception:
+        pass
+    return val_str
+
 # --- FUNCIÓN DE ENVÍO DE CORREO ELECTRÓNICO ---
 def enviar_reporte_correo(destinatarios, asunto, cuerpo, archivo_bytes, nombre_archivo):
     try:
@@ -238,35 +254,49 @@ if opcion == "📥 Migración Inicial (Excel)":
                     conn = conectar_db()
                     conn.execute("DELETE FROM piquetes WHERE tramo = ?", (nombre_proyecto_manual,))
                     
-                    def get_val(row, col_name):
-                        val = row.get(col_name)
-                        if isinstance(val, pd.Series):
-                            val = val.iloc[0]
-                        if pd.isna(val) or str(val).strip().lower() in ["nan", "none", "", "nat"]:
-                            return None
-                        return str(val).strip()
+                    def get_val(row, *col_names):
+                        for c in col_names:
+                            if c in row.index:
+                                val = row.get(c)
+                                if isinstance(val, pd.Series):
+                                    val = val.iloc[0]
+                                if pd.notna(val) and str(val).strip().lower() not in ["nan", "none", "", "nat"]:
+                                    return str(val).strip()
+                        return None
 
                     registros_cargados = 0
                     for _, row in df.iterrows():
                         piquete_val = get_val(row, "PIQUETE")
                         if piquete_val:
-                            cant_aisl = get_val(row, "CANTIDAD AISLADORES") or get_val(row, "CANT_AISLADORES") or get_val(row, "AISLADORES")
+                            cant_aisl = get_val(row, "CANTIDAD AISLADORES", "CANT_AISLADORES", "AISLADORES")
                             try:
                                 cant_aisl = int(float(cant_aisl)) if cant_aisl else 3
                             except:
                                 cant_aisl = 3
 
-                            m_tend = get_val(row, "METROS TENDIDO") or get_val(row, "METROS") or get_val(row, "VANO") or get_val(row, "DISTANCIA")
+                            m_tend = get_val(row, "METROS TENDIDO", "METROS", "VANO", "DISTANCIA")
                             try:
                                 m_tend = float(m_tend) if m_tend else 0.0
                             except:
                                 m_tend = 0.0
 
-                            m3_exc = get_val(row, "M3 EXCAVACION") or get_val(row, "M3_EXCAVACION") or get_val(row, "M3 EXCAV") or get_val(row, "VOLUMEN EXCAVACION")
+                            m3_exc = get_val(row, "M3 EXCAVACION", "M3_EXCAVACION", "VOLUMEN EXCAVACION")
                             try:
                                 m3_exc = float(m3_exc) if m3_exc else 0.0
                             except:
                                 m3_exc = 0.0
+
+                            # Mapeo flexible de fechas que soporta columnas exportadas previamente
+                            f_excav = normalizar_fecha(get_val(row, "1. EXCAV PIQUETES", "EXCAV PIQUETES", "EXCAVACION", "EXCAV_PIQUETES"))
+                            f_vert = normalizar_fecha(get_val(row, "2. VERTICALIZADO", "VERTICALIZADO"))
+                            f_desf = normalizar_fecha(get_val(row, "3. DESFILE DE POSTE", "DESFILE DE POSTE", "DESFILE_DE_POSTE", "DESFILE"))
+                            f_riend = normalizar_fecha(get_val(row, "4. MONTAJE RIENDAS", "MONTAJE RIENDAS", "MONTAJE_RIENDAS", "RIENDAS"))
+                            f_cruc = normalizar_fecha(get_val(row, "5. ARMADO DE CRUCETAS", "ARMADO DE CRUCETAS", "ARMADO DE CRUCETA", "ARMADO_DE_CRUCETAS", "CRUCETAS"))
+                            f_aisl = normalizar_fecha(get_val(row, "6. MONTAJE DE AISLADOR (FECHA)", "MONTAJE DE AISLADOR", "MONTAJE_AISLADOR"))
+                            f_tend = normalizar_fecha(get_val(row, "7. TENDIDO DE CONDUCTOR", "TENDIDO DE CONDUCTOR", "TENDIDO"))
+                            f_flec = normalizar_fecha(get_val(row, "8. FLECHADO", "FLECHADO"))
+                            f_engr = normalizar_fecha(get_val(row, "9. ENGRAMPADO", "ENGRAMPADO"))
+                            f_liber = normalizar_fecha(get_val(row, "10. FECHA MONTAJE / LIBERACIÓN FINAL", "FECHA DE LIBERACION", "FECHA MONTAJE", "FECHA_MONTAJE"))
 
                             conn.execute("""
                                 INSERT OR REPLACE INTO piquetes (
@@ -282,17 +312,17 @@ if opcion == "📥 Migración Inicial (Excel)":
                                 cant_aisl,
                                 m_tend,
                                 m3_exc,
-                                get_val(row, "EXCAV PIQUETES"),
-                                get_val(row, "VERTICALIZADO"),
-                                get_val(row, "DESFILE DE POSTE") or get_val(row, "DESFILE_DE_POSTE") or get_val(row, "DESFILE"),
-                                get_val(row, "MONTAJE RIENDAS"),
-                                get_val(row, "ARMADO DE CRUCETAS") or get_val(row, "ARMADO DE CRUCETA") or get_val(row, "CRUCETAS"),
-                                get_val(row, "MONTAJE DE AISLADOR"),
-                                get_val(row, "TENDIDO DE CONDUCTOR"),
-                                get_val(row, "FLECHADO"),
-                                get_val(row, "ENGRAMPADO"),
-                                get_val(row, "FECHA DE LIBERACION"),
-                                get_val(row, "OBSERVACION")
+                                f_excav,
+                                f_vert,
+                                f_desf,
+                                f_riend,
+                                f_cruc,
+                                f_aisl,
+                                f_tend,
+                                f_flec,
+                                f_engr,
+                                f_liber,
+                                get_val(row, "OBSERVACION", "OBSERVACION_OFM")
                             ))
                             registros_cargados += 1
                                 
@@ -301,7 +331,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                     
                     if registros_cargados > 0:
                         st.session_state.proyecto_activo = nombre_proyecto_manual
-                        st.success(f"✔️ ¡Migración exitosa! Se procesaron y guardaron {registros_cargados} piquetes.")
+                        st.success(f"✔️ ¡Migración exitosa! Se procesaron y guardaron {registros_cargados} piquetes correctamente.")
                         st.rerun()
             except Exception as e:
                 st.error(f"❌ Error al procesar el Excel: {e}")
@@ -567,7 +597,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 f_desfile = st.date_input("3. DESFILE DE POSTE", value=convertir_a_fecha(p_info["desfile_de_poste"]))
                 f_riendas = st.date_input("4. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
             with col2:
-                f_crucetas = st.date_input("5. ARMADO DE CRUCETAS", value=convertir_a_fecha(p_info["armado_de_crucetas"])) # <--- NUEVO CAMPO
+                f_crucetas = st.date_input("5. ARMADO DE CRUCETAS", value=convertir_a_fecha(p_info["armado_de_crucetas"]))
                 f_aislador = st.date_input("6. MONTAJE DE AISLADOR (FECHA)", value=convertir_a_fecha(p_info["montaje_aislador"]))
                 f_tendido = st.date_input("7. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
                 f_flechado = st.date_input("8. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
@@ -893,16 +923,33 @@ else:
 
         st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:20px;'>📋 Matriz Completa de Trazabilidad</h3>", unsafe_allow_html=True)
         df_mostrar = df_tramo.copy()
+
+        # Nombres legibles e identificables para la exportación en Excel
+        renombrar_columnas_export = {
+            "excavacion": "1. EXCAV PIQUETES",
+            "verticalizado": "2. VERTICALIZADO",
+            "desfile_de_poste": "3. DESFILE DE POSTE",
+            "montaje_riendas": "4. MONTAJE RIENDAS",
+            "armado_de_crucetas": "5. ARMADO DE CRUCETAS",
+            "montaje_aislador": "6. MONTAJE DE AISLADOR (FECHA)",
+            "tendido": "7. TENDIDO DE CONDUCTOR",
+            "flechado": "8. FLECHADO",
+            "engrampado": "9. ENGRAMPADO",
+            "fecha_montaje": "10. FECHA MONTAJE / LIBERACIÓN FINAL"
+        }
+
         for hito in HITOS_OBRA:
             df_mostrar[hito] = df_mostrar[hito].dt.strftime('%d/%m/%Y').fillna("-")
+            
+        df_exportar = df_mostrar.rename(columns=renombrar_columnas_export)
+        columnas_export_orden = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "metros_tendido", "m3_excavacion", "Avance_%", "anexo_montaje", "red_line"] + list(renombrar_columnas_export.values())
         
-        columnas_visibles = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "metros_tendido", "m3_excavacion", "Avance_%", "anexo_montaje", "red_line"] + HITOS_OBRA
         st.markdown("---")
         st.markdown("### 📥 Exportar y Notificar Reportes de Trazabilidad")
         
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-            df_mostrar[columnas_visibles].to_excel(writer, sheet_name=f"Progreso_{tramo_sel}", index=False)
+            df_exportar[columnas_export_orden].to_excel(writer, sheet_name=f"Progreso_{tramo_sel}", index=False)
         
         col_exp1, col_exp2 = st.columns(2)
         
