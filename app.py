@@ -62,10 +62,9 @@ opcion = st.sidebar.radio("Ir a la pestaña:", [
     "📥 Migración Inicial (Excel)"
 ])
 
-# Estilos personalizados CSS para modernizar el Dashboard y optimizar espacio vertical
+# Estilos personalizados CSS
 st.markdown("""
     <style>
-    /* Reducir el margen superior del contenedor principal */
     .block-container {
         padding-top: 1.5rem !important;
         padding-bottom: 1rem !important;
@@ -116,7 +115,8 @@ def inicializar_db():
     cursor.execute("PRAGMA table_info(piquetes)")
     columnas = [col[1] for col in cursor.fetchall()]
     
-    if len(columnas) > 0 and "cantidad_aisladores" not in columnas:
+    # Si la base de datos existe pero no tiene las nuevas columnas, la reiniciamos limpiamente
+    if len(columnas) > 0 and ("planialtimetria" not in columnas or "idi" not in columnas):
         conn.close()
         try: 
             os.remove(DB_NAME)
@@ -133,6 +133,8 @@ def inicializar_db():
             tipo_estructura TEXT,
             longitud_poste TEXT,
             cantidad_aisladores INTEGER DEFAULT 3,
+            planialtimetria TEXT,
+            idi TEXT,
             excavacion TEXT,
             verticalizado TEXT,
             tendido TEXT,
@@ -159,7 +161,10 @@ def inicializar_db():
 
 inicializar_db()
 
+# --- LISTA REVISADA DE HITOS QUE INCLUYE PLANIALTIMETRÍA E IDI ---
 HITOS_OBRA = [
+    "planialtimetria",
+    "idi",
     "excavacion", 
     "verticalizado", 
     "montaje_riendas", 
@@ -178,7 +183,7 @@ if not os.path.exists(CARPA_ARCHIVOS):
 # -------------------------------------------------------------------------
 if opcion == "📥 Migración Inicial (Excel)":
     st.subheader("📥 Inicialización y Carga de Planilla Maestra Excel")
-    st.markdown("Cargue el archivo Excel inicial para estructurar los piquetes y frentes de trabajo de forma limpia.")
+    st.markdown("Cargue el archivo Excel inicial para estructurar los piquetes y frentes de trabajo.")
     
     archivo_excel = st.file_uploader("Suba la planilla de Trazabilidad (.xlsx)", type=["xlsx"], key="uploader_excel_maestro")
     nombre_proyecto_manual = st.text_input("Ingrese el Nombre del Proyecto / Frente (Ej: WM, LTM):", value="WM", key="input_nombre_proyecto")
@@ -234,16 +239,19 @@ if opcion == "📥 Migración Inicial (Excel)":
 
                             conn.execute("""
                                 INSERT OR REPLACE INTO piquetes (
-                                    tramo, piquete, tipo_estructura, longitud_poste, cantidad_aisladores, excavacion, verticalizado, 
-                                    tendido, flechado, engrampado, montaje_aislador, montaje_riendas, fecha_montaje, observacion_ofm
+                                    tramo, piquete, tipo_estructura, longitud_poste, cantidad_aisladores, 
+                                    planialtimetria, idi, excavacion, verticalizado, tendido, flechado, 
+                                    engrampado, montaje_aislador, montaje_riendas, fecha_montaje, observacion_ofm
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 nombre_proyecto_manual,
                                 piquete_val,
                                 get_val(row, "TIPO ESTRUCTURA") or "S/D",
                                 get_val(row, "LONGITUD POSTE"),
                                 cant_aisl,
+                                get_val(row, "PLANIALTIMETRIA") or get_val(row, "PLANIALTIMETRÍA"),
+                                get_val(row, "IDI"),
                                 get_val(row, "EXCAV PIQUETES"),
                                 get_val(row, "VERTICALIZADO"),
                                 get_val(row, "TENDIDO DE CONDUCTOR"),
@@ -494,14 +502,16 @@ elif opcion == "📝 Carga y Gestión de Campo":
             st.markdown("---")
             col1, col2 = st.columns(2)
             with col1:
-                f_excav = st.date_input("1. EXCAV PIQUETES", value=convertir_a_fecha(p_info["excavacion"]))
-                f_vert = st.date_input("2. VERTICALIZADO", value=convertir_a_fecha(p_info["verticalizado"]))
-                f_riendas = st.date_input("3. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
-                f_aislador = st.date_input("4. MONTAJE DE AISLADOR (FECHA)", value=convertir_a_fecha(p_info["montaje_aislador"]))
+                f_plani = st.date_input("1. PLANIALTIMETRÍA", value=convertir_a_fecha(p_info.get("planialtimetria")))
+                f_idi = st.date_input("2. IDI", value=convertir_a_fecha(p_info.get("idi")))
+                f_excav = st.date_input("3. EXCAV PIQUETES", value=convertir_a_fecha(p_info["excavacion"]))
+                f_vert = st.date_input("4. VERTICALIZADO", value=convertir_a_fecha(p_info["verticalizado"]))
+                f_riendas = st.date_input("5. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
             with col2:
-                f_tendido = st.date_input("5. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
-                f_flechado = st.date_input("6. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
-                f_engramp = st.date_input("7. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
+                f_aislador = st.date_input("6. MONTAJE DE AISLADOR", value=convertir_a_fecha(p_info["montaje_aislador"]))
+                f_tendido = st.date_input("7. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
+                f_flechado = st.date_input("8. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
+                f_engramp = st.date_input("9. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
 
             st.markdown("---")
             f_montaje = st.date_input("Fecha Montaje / Liberación Final", value=convertir_a_fecha(p_info["fecha_montaje"]))
@@ -529,12 +539,19 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
                 conn = conectar_db()
                 conn.execute("""
-                    UPDATE piquetes SET cantidad_aisladores=?, excavacion=?, verticalizado=?, montaje_riendas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
+                    UPDATE piquetes SET 
+                        cantidad_aisladores=?, planialtimetria=?, idi=?, excavacion=?, 
+                        verticalizado=?, montaje_riendas=?, montaje_aislador=?, tendido=?, 
+                        flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
                     WHERE piquete=?
-                """, (int(cant_aisladores_input), str(f_excav) if f_excav else None, str(f_vert) if f_vert else None, str(f_riendas) if f_riendas else None,
-                      str(f_aislador) if f_aislador else None, str(f_tendido) if f_tendido else None, str(f_flechado) if f_flechado else None, 
-                      str(f_engramp) if f_engramp else None, str(f_montaje) if f_montaje else None, 
-                      str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, piquete_sel))
+                """, (
+                    int(cant_aisladores_input), str(f_plani) if f_plani else None, str(f_idi) if f_idi else None, 
+                    str(f_excav) if f_excav else None, str(f_vert) if f_vert else None, str(f_riendas) if f_riendas else None,
+                    str(f_aislador) if f_aislador else None, str(f_tendido) if f_tendido else None, str(f_flechado) if f_flechado else None, 
+                    str(f_engramp) if f_engramp else None, str(f_montaje) if f_montaje else None, 
+                    str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, 
+                    piquete_sel
+                ))
                 conn.commit()
                 conn.close()
                 
@@ -613,6 +630,8 @@ else:
         hitos_completados = sum(df_tramo[hito].notna().sum() for hito in HITOS_OBRA) if not df_tramo.empty else 0
         productividad_media = round(hitos_completados / dias_transcurridos, 2)
 
+        total_plani = df_tramo["planialtimetria"].notna().sum() if not df_tramo.empty else 0
+        total_idi = df_tramo["idi"].notna().sum() if not df_tramo.empty else 0
         total_excavados = df_tramo["excavacion"].notna().sum() if not df_tramo.empty else 0
         total_verticalizados = df_tramo["verticalizado"].notna().sum() if not df_tramo.empty else 0
         total_tendidos = df_tramo["tendido"].notna().sum() if not df_tramo.empty else 0
@@ -694,12 +713,12 @@ else:
         
         with col_bot2:
             df_frentes = pd.DataFrame({
-                "Frente Operativo": ["1. Excavación", "2. Verticalizado", "5. Tendido"],
-                "Piquetes Completados": [total_excavados, total_verticalizados, total_tendidos]
+                "Frente Operativo": ["1. Planialtimetría", "2. IDI", "3. Excavación", "4. Verticalizado", "5. Tendido"],
+                "Piquetes Completados": [total_plani, total_idi, total_excavados, total_verticalizados, total_tendidos]
             })
             fig_frentes = px.bar(df_frentes, x="Piquetes Completados", y="Frente Operativo", orientation='h',
                                  text="Piquetes Completados", color="Piquetes Completados", color_continuous_scale="Darkmint")
-            fig_frentes.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=140, showlegend=False, coloraxis_showscale=False)
+            fig_frentes.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=180, showlegend=False, coloraxis_showscale=False)
             st.plotly_chart(fig_frentes, use_container_width=True)
 
         # --- PROYECCIÓN BASADA EN RITMO REAL DE CARGA DIARIA ---
