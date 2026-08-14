@@ -112,6 +112,8 @@ def conectar_db():
 def inicializar_db():
     conn = conectar_db()
     cursor = conn.cursor()
+    
+    # 1. Crear tabla base si no existe
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS piquetes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +136,22 @@ def inicializar_db():
             observacion_ofm TEXT
         )
     """)
+    
+    # 2. Migración defensiva: asegurar que existan las columnas en bases de datos creadas anteriormente
+    cursor.execute("PRAGMA table_info(piquetes)")
+    columnas_existentes = [col[1] for col in cursor.fetchall()]
+    
+    columnas_requeridas = {
+        "montaje_aislador": "TEXT",
+        "montaje_riendas": "TEXT",
+        "doc_planialtimetria": "TEXT",
+        "doc_idi": "TEXT"
+    }
+    
+    for col, tipo in columnas_requeridas.items():
+        if col not in columnas_existentes:
+            cursor.execute(f"ALTER TABLE piquetes ADD COLUMN {col} {tipo}")
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cronogramas (
             tramo TEXT PRIMARY KEY,
@@ -286,7 +304,8 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
             peso_por_hito = 100 / len(HITOS_OBRA)
             df_proyecto["Avance_%"] = 0
             for hito in HITOS_OBRA:
-                df_proyecto["Avance_%"] += df_proyecto[hito].notna().astype(int) * peso_por_hito
+                if hito in df_proyecto.columns:
+                    df_proyecto["Avance_%"] += df_proyecto[hito].notna().astype(int) * peso_por_hito
             df_proyecto["Avance_%"] = df_proyecto["Avance_%"].round().astype(int)
 
             total_piquetes = len(df_proyecto)
@@ -294,7 +313,7 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
             completados = len(df_proyecto[df_proyecto["Avance_%"] == 100])
 
             total_aisladores = df_proyecto["cantidad_aisladores"].fillna(3).sum()
-            aisladores_instalados = df_proyecto[df_proyecto["montaje_aislador"].notna()]["cantidad_aisladores"].fillna(3).sum()
+            aisladores_instalados = df_proyecto[df_proyecto["montaje_aislador"].notna()]["cantidad_aisladores"].fillna(3).sum() if "montaje_aislador" in df_proyecto.columns else 0
 
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -341,7 +360,8 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         peso_por_hito = 100 / len(HITOS_OBRA)
         df_obra["Avance_%"] = 0
         for hito in HITOS_OBRA:
-            df_obra["Avance_%"] += df_obra[hito].notna().astype(int) * peso_por_hito
+            if hito in df_obra.columns:
+                df_obra["Avance_%"] += df_obra[hito].notna().astype(int) * peso_por_hito
         df_obra["Avance_%"] = df_obra["Avance_%"].round().astype(int)
 
         tramos_validos = [t for t in df_obra["tramo"].dropna().unique() if str(t).strip().lower() != "nan" and str(t).strip() != ""]
@@ -355,7 +375,7 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         
         total_piquetes_frente = len(df_inv)
         total_aisladores_frente = df_inv["cantidad_aisladores"].fillna(3).sum()
-        aisladores_colocados_frente = df_inv[df_inv["montaje_aislador"].notna()]["cantidad_aisladores"].fillna(3).sum()
+        aisladores_colocados_frente = df_inv[df_inv["montaje_aislador"].notna()]["cantidad_aisladores"].fillna(3).sum() if "montaje_aislador" in df_inv.columns else 0
         
         m1, m2, m3 = st.columns(3)
         with m1:
@@ -446,20 +466,20 @@ elif opcion == "📝 Carga y Gestión de Campo":
         col_dl1, col_dl2 = st.columns(2)
         
         with col_dl1:
-            doc_plani_actual = p_info["doc_planialtimetria"] if p_info["doc_planialtimetria"] and p_info["doc_planialtimetria"] != "None" else None
-            if doc_plani_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_plani_actual)):
+            doc_plani_actual = p_info.get("doc_planialtimetria")
+            if doc_plani_actual and str(doc_plani_actual) != "None" and os.path.exists(os.path.join(CARPA_ARCHIVOS, str(doc_plani_actual))):
                 st.write(f"📐 **Planialtimetría Adjunta:** `{doc_plani_actual}`")
-                with open(os.path.join(CARPA_ARCHIVOS, doc_plani_actual), "rb") as file:
-                    st.download_button(label="📥 Descargar Planialtimetría", data=file, file_name=doc_plani_actual, mime="application/octet-stream", key="dl_plani")
+                with open(os.path.join(CARPA_ARCHIVOS, str(doc_plani_actual)), "rb") as file:
+                    st.download_button(label="📥 Descargar Planialtimetría", data=file, file_name=str(doc_plani_actual), mime="application/octet-stream", key="dl_plani")
             else:
                 st.warning("⚠️ Sin documento de Planialtimetría adjunto.")
                 
         with col_dl2:
-            doc_idi_actual = p_info["doc_idi"] if p_info["doc_idi"] and p_info["doc_idi"] != "None" else None
-            if doc_idi_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_idi_actual)):
+            doc_idi_actual = p_info.get("doc_idi")
+            if doc_idi_actual and str(doc_idi_actual) != "None" and os.path.exists(os.path.join(CARPA_ARCHIVOS, str(doc_idi_actual))):
                 st.write(f"📋 **IDI Adjunto:** `{doc_idi_actual}`")
-                with open(os.path.join(CARPA_ARCHIVOS, doc_idi_actual), "rb") as file:
-                    st.download_button(label="📥 Descargar IDI", data=file, file_name=doc_idi_actual, mime="application/octet-stream", key="dl_idi")
+                with open(os.path.join(CARPA_ARCHIVOS, str(doc_idi_actual)), "rb") as file:
+                    st.download_button(label="📥 Descargar IDI", data=file, file_name=str(doc_idi_actual), mime="application/octet-stream", key="dl_idi")
             else:
                 st.warning("⚠️ Sin documento IDI adjunto.")
                 
@@ -483,17 +503,17 @@ elif opcion == "📝 Carga y Gestión de Campo":
             st.markdown("---")
             col1, col2 = st.columns(2)
             with col1:
-                f_excav = st.date_input("1. EXCAV PIQUETES", value=convertir_a_fecha(p_info["excavacion"]))
-                f_vert = st.date_input("2. VERTICALIZADO", value=convertir_a_fecha(p_info["verticalizado"]))
-                f_riendas = st.date_input("3. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
-                f_aislador = st.date_input("4. MONTAJE DE AISLADOR", value=convertir_a_fecha(p_info["montaje_aislador"]))
+                f_excav = st.date_input("1. EXCAV PIQUETES", value=convertir_a_fecha(p_info.get("excavacion")))
+                f_vert = st.date_input("2. VERTICALIZADO", value=convertir_a_fecha(p_info.get("verticalizado")))
+                f_riendas = st.date_input("3. MONTAJE RIENDAS", value=convertir_a_fecha(p_info.get("montaje_riendas")))
+                f_aislador = st.date_input("4. MONTAJE DE AISLADOR", value=convertir_a_fecha(p_info.get("montaje_aislador")))
             with col2:
-                f_tendido = st.date_input("5. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
-                f_flechado = st.date_input("6. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
-                f_engramp = st.date_input("7. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
+                f_tendido = st.date_input("5. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info.get("tendido")))
+                f_flechado = st.date_input("6. FLECHADO", value=convertir_a_fecha(p_info.get("flechado")))
+                f_engramp = st.date_input("7. ENGRAMPADO", value=convertir_a_fecha(p_info.get("engrampado")))
 
             st.markdown("---")
-            f_montaje = st.date_input("Fecha Montaje / Liberación Final", value=convertir_a_fecha(p_info["fecha_montaje"]))
+            f_montaje = st.date_input("Fecha Montaje / Liberación Final", value=convertir_a_fecha(p_info.get("fecha_montaje")))
 
             st.markdown("##### 📥 Adjuntar Documentos de Referencia")
             col_arch1, col_arch2 = st.columns(2)
@@ -503,8 +523,8 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 archivo_idi = st.file_uploader("Adjuntar Documento IDI", type=["docx", "xlsx", "pdf", "xls", "dwg"])
 
             if st.form_submit_button("💾 Actualizar Historial de Trazabilidad y Archivos"):
-                nombre_plani = p_info["doc_planialtimetria"]
-                nombre_idi = p_info["doc_idi"]
+                nombre_plani = p_info.get("doc_planialtimetria")
+                nombre_idi = p_info.get("doc_idi")
                 
                 if archivo_planialtimetria is not None:
                     nombre_plani = f"Planialtimetria_{piquete_sel}_{archivo_planialtimetria.name}"
@@ -551,7 +571,10 @@ else:
         st.info("No existen registros de obra para procesar analíticas. Vaya al módulo de Migración.")
     else:
         for hito in HITOS_OBRA:
-            df_obra[hito] = pd.to_datetime(df_obra[hito], errors='coerce')
+            if hito in df_obra.columns:
+                df_obra[hito] = pd.to_datetime(df_obra[hito], errors='coerce')
+            else:
+                df_obra[hito] = pd.NaT
             
         peso_por_hito = 100 / len(HITOS_OBRA)
         df_obra["Avance_%"] = 0
@@ -606,12 +629,12 @@ else:
             fin_proyectado = inicio_base + pd.Timedelta(days=dias_proyectados_totales)
             desviacion_dias = (fin_proyectado - entrega_base).days
         
-        hitos_completados = sum(df_tramo[hito].notna().sum() for hito in HITOS_OBRA) if not df_tramo.empty else 0
+        hitos_completados = sum(df_tramo[hito].notna().sum() for hito in HITOS_OBRA if hito in df_tramo.columns) if not df_tramo.empty else 0
         productividad_media = round(hitos_completados / dias_transcurridos, 2)
 
-        total_excavados = df_tramo["excavacion"].notna().sum() if not df_tramo.empty else 0
-        total_verticalizados = df_tramo["verticalizado"].notna().sum() if not df_tramo.empty else 0
-        total_tendidos = df_tramo["tendido"].notna().sum() if not df_tramo.empty else 0
+        total_excavados = df_tramo["excavacion"].notna().sum() if "excavacion" in df_tramo.columns and not df_tramo.empty else 0
+        total_verticalizados = df_tramo["verticalizado"].notna().sum() if "verticalizado" in df_tramo.columns and not df_tramo.empty else 0
+        total_tendidos = df_tramo["tendido"].notna().sum() if "tendido" in df_tramo.columns and not df_tramo.empty else 0
 
         # --- TARJETAS KPIS SUPERIORES ---
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
@@ -767,9 +790,10 @@ else:
         st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:20px;'>📋 Matriz Completa de Trazabilidad</h3>", unsafe_allow_html=True)
         df_mostrar = df_tramo.copy()
         for hito in HITOS_OBRA:
-            df_mostrar[hito] = df_mostrar[hito].dt.strftime('%d/%m/%Y').fillna("-")
+            if hito in df_mostrar.columns:
+                df_mostrar[hito] = df_mostrar[hito].dt.strftime('%d/%m/%Y').fillna("-")
         
-        columnas_visibles = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "Avance_%", "doc_planialtimetria", "doc_idi"] + HITOS_OBRA
+        columnas_visibles = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "Avance_%", "doc_planialtimetria", "doc_idi"] + [h for h in HITOS_OBRA if h in df_mostrar.columns]
         st.markdown("---")
         st.markdown("### 📥 Exportar y Notificar Reportes de Trazabilidad")
         
