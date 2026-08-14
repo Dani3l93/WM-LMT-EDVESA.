@@ -503,14 +503,12 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         st.markdown("---")
         st.markdown("### 📊 Auditoría y Estado de Parámetros por Columna")
         
+        # Opciones filtradas exclusivamente para parámetros significativos en auditoría
         columnas_analizar = {
-            "piquete": "📍 Nombre / Código de Piquete",
-            "tipo_estructura": "🏗️ Tipos de Estructura",
             "longitud_poste": "📏 Longitud de Poste",
             "cantidad_aisladores": "🔌 Cantidad de Aisladores por Poste",
             "metros_tendido": "📏 Metros de Vano / Tendido",
             "m3_excavacion": "⛏️ Volúmenes de Excavación (m³)",
-            "tipo_de_equipo": "⚙️ Equipos de Maniobra",
             "Avance_%": "📈 Porcentaje de Avance Individual"
         }
         
