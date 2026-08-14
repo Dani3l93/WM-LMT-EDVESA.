@@ -112,19 +112,6 @@ def conectar_db():
 def inicializar_db():
     conn = conectar_db()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(piquetes)")
-    columnas = [col[1] for col in cursor.fetchall()]
-    
-    # Si la base de datos existe pero no tiene las nuevas columnas, la reiniciamos limpiamente
-    if len(columnas) > 0 and ("planialtimetria" not in columnas or "idi" not in columnas):
-        conn.close()
-        try: 
-            os.remove(DB_NAME)
-        except: 
-            pass
-        conn = conectar_db()
-        cursor = conn.cursor()
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS piquetes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,8 +120,6 @@ def inicializar_db():
             tipo_estructura TEXT,
             longitud_poste TEXT,
             cantidad_aisladores INTEGER DEFAULT 3,
-            planialtimetria TEXT,
-            idi TEXT,
             excavacion TEXT,
             verticalizado TEXT,
             tendido TEXT,
@@ -144,8 +129,8 @@ def inicializar_db():
             montaje_riendas TEXT,
             fecha_montaje TEXT,
             tipo_de_equipo TEXT,
-            anexo_montaje TEXT,
-            red_line TEXT,
+            doc_planialtimetria TEXT,
+            doc_idi TEXT,
             observacion_ofm TEXT
         )
     """)
@@ -161,10 +146,8 @@ def inicializar_db():
 
 inicializar_db()
 
-# --- LISTA REVISADA DE HITOS QUE INCLUYE PLANIALTIMETRÍA E IDI ---
+# --- HITOS EXCLUSIVAMENTE OPERATIVOS DE CAMPO ---
 HITOS_OBRA = [
-    "planialtimetria",
-    "idi",
     "excavacion", 
     "verticalizado", 
     "montaje_riendas", 
@@ -240,18 +223,16 @@ if opcion == "📥 Migración Inicial (Excel)":
                             conn.execute("""
                                 INSERT OR REPLACE INTO piquetes (
                                     tramo, piquete, tipo_estructura, longitud_poste, cantidad_aisladores, 
-                                    planialtimetria, idi, excavacion, verticalizado, tendido, flechado, 
+                                    excavacion, verticalizado, tendido, flechado, 
                                     engrampado, montaje_aislador, montaje_riendas, fecha_montaje, observacion_ofm
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 nombre_proyecto_manual,
                                 piquete_val,
                                 get_val(row, "TIPO ESTRUCTURA") or "S/D",
                                 get_val(row, "LONGITUD POSTE"),
                                 cant_aisl,
-                                get_val(row, "PLANIALTIMETRIA") or get_val(row, "PLANIALTIMETRÍA"),
-                                get_val(row, "IDI"),
                                 get_val(row, "EXCAV PIQUETES"),
                                 get_val(row, "VERTICALIZADO"),
                                 get_val(row, "TENDIDO DE CONDUCTOR"),
@@ -461,26 +442,26 @@ elif opcion == "📝 Carga y Gestión de Campo":
         
         st.info(f"📏 **LONGITUD POSTE:** {l_poste} | 🏗️ **ESTRUCTURA:** {p_info['tipo_estructura']} | 🔌 **AISLADORES REQUERIDOS:** {cant_aisl_actual}")
         
-        st.markdown("### 📂 Documentación Actualizada del Piquete")
+        st.markdown("### 📄 Documentos de Referencia del Piquete")
         col_dl1, col_dl2 = st.columns(2)
         
         with col_dl1:
-            doc_anexo_actual = p_info["anexo_montaje"] if p_info["anexo_montaje"] and p_info["anexo_montaje"] != "None" else None
-            if doc_anexo_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_anexo_actual)):
-                st.write(f"📄 **Anexo Técnico Activo:** `{doc_anexo_actual}`")
-                with open(os.path.join(CARPA_ARCHIVOS, doc_anexo_actual), "rb") as file:
-                    st.download_button(label="📥 Descargar Anexo Montaje", data=file, file_name=doc_anexo_actual, mime="application/octet-stream", key="dl_anexo")
+            doc_plani_actual = p_info["doc_planialtimetria"] if p_info["doc_planialtimetria"] and p_info["doc_planialtimetria"] != "None" else None
+            if doc_plani_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_plani_actual)):
+                st.write(f"📐 **Planialtimetría Adjunta:** `{doc_plani_actual}`")
+                with open(os.path.join(CARPA_ARCHIVOS, doc_plani_actual), "rb") as file:
+                    st.download_button(label="📥 Descargar Planialtimetría", data=file, file_name=doc_plani_actual, mime="application/octet-stream", key="dl_plani")
             else:
-                st.warning("⚠️ No hay ningún Anexo Técnico cargado.")
+                st.warning("⚠️ Sin documento de Planialtimetría adjunto.")
                 
         with col_dl2:
-            doc_red_actual = p_info["red_line"] if p_info["red_line"] and p_info["red_line"] != "None" else None
-            if doc_red_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_red_actual)):
-                st.write(f"🗺️ **Plano Red Line Activo:** `{doc_red_actual}`")
-                with open(os.path.join(CARPA_ARCHIVOS, doc_red_actual), "rb") as file:
-                    st.download_button(label="📥 Descargar Red Line", data=file, file_name=doc_red_actual, mime="application/octet-stream", key="dl_redline")
+            doc_idi_actual = p_info["doc_idi"] if p_info["doc_idi"] and p_info["doc_idi"] != "None" else None
+            if doc_idi_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_idi_actual)):
+                st.write(f"📋 **IDI Adjunto:** `{doc_idi_actual}`")
+                with open(os.path.join(CARPA_ARCHIVOS, doc_idi_actual), "rb") as file:
+                    st.download_button(label="📥 Descargar IDI", data=file, file_name=doc_idi_actual, mime="application/octet-stream", key="dl_idi")
             else:
-                st.warning("⚠️ No hay ningún plano Red Line cargado.")
+                st.warning("⚠️ Sin documento IDI adjunto.")
                 
         st.markdown("---")
         
@@ -495,68 +476,66 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
             st.markdown("##### ⚙️ Configuración y Cronograma de Hitos")
             
-            c_aisl1, c_aisl2 = st.columns(2)
+            c_aisl1, _ = st.columns(2)
             with c_aisl1:
                 cant_aisladores_input = st.number_input("🔌 Cantidad de Aisladores en esta Estructura:", min_value=1, max_value=20, value=cant_aisl_actual)
             
             st.markdown("---")
             col1, col2 = st.columns(2)
             with col1:
-                f_plani = st.date_input("1. PLANIALTIMETRÍA", value=convertir_a_fecha(p_info.get("planialtimetria")))
-                f_idi = st.date_input("2. IDI", value=convertir_a_fecha(p_info.get("idi")))
-                f_excav = st.date_input("3. EXCAV PIQUETES", value=convertir_a_fecha(p_info["excavacion"]))
-                f_vert = st.date_input("4. VERTICALIZADO", value=convertir_a_fecha(p_info["verticalizado"]))
-                f_riendas = st.date_input("5. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
+                f_excav = st.date_input("1. EXCAV PIQUETES", value=convertir_a_fecha(p_info["excavacion"]))
+                f_vert = st.date_input("2. VERTICALIZADO", value=convertir_a_fecha(p_info["verticalizado"]))
+                f_riendas = st.date_input("3. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
+                f_aislador = st.date_input("4. MONTAJE DE AISLADOR", value=convertir_a_fecha(p_info["montaje_aislador"]))
             with col2:
-                f_aislador = st.date_input("6. MONTAJE DE AISLADOR", value=convertir_a_fecha(p_info["montaje_aislador"]))
-                f_tendido = st.date_input("7. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
-                f_flechado = st.date_input("8. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
-                f_engramp = st.date_input("9. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
+                f_tendido = st.date_input("5. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
+                f_flechado = st.date_input("6. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
+                f_engramp = st.date_input("7. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
 
             st.markdown("---")
             f_montaje = st.date_input("Fecha Montaje / Liberación Final", value=convertir_a_fecha(p_info["fecha_montaje"]))
 
-            st.markdown("##### 📥 Carga / Actualización de Documentos Técnicos")
+            st.markdown("##### 📥 Adjuntar Documentos de Referencia")
             col_arch1, col_arch2 = st.columns(2)
             with col_arch1:
-                archivo_anexo = st.file_uploader("Subir Nuevo ANEXO MONTAJE", type=["docx", "xlsx", "pdf", "xls"])
+                archivo_planialtimetria = st.file_uploader("Adjuntar Documento PLANIALTIMETRÍA", type=["docx", "xlsx", "pdf", "xls", "dwg"])
             with col_arch2:
-                archivo_redline = st.file_uploader("Subir Nuevo RED LINE", type=["docx", "xlsx", "pdf", "xls"])
+                archivo_idi = st.file_uploader("Adjuntar Documento IDI", type=["docx", "xlsx", "pdf", "xls", "dwg"])
 
             if st.form_submit_button("💾 Actualizar Historial de Trazabilidad y Archivos"):
-                nombre_anexo = p_info["anexo_montaje"]
-                nombre_redline = p_info["red_line"]
+                nombre_plani = p_info["doc_planialtimetria"]
+                nombre_idi = p_info["doc_idi"]
                 
-                if archivo_anexo is not None:
-                    nombre_anexo = f"Anexo_{piquete_sel}_{archivo_anexo.name}"
-                    with open(os.path.join(CARPA_ARCHIVOS, nombre_anexo), "wb") as f:
-                        f.write(archivo_anexo.getbuffer())
+                if archivo_planialtimetria is not None:
+                    nombre_plani = f"Planialtimetria_{piquete_sel}_{archivo_planialtimetria.name}"
+                    with open(os.path.join(CARPA_ARCHIVOS, nombre_plani), "wb") as f:
+                        f.write(archivo_planialtimetria.getbuffer())
                         
-                if archivo_redline is not None:
-                    nombre_redline = f"RedLine_{piquete_sel}_{archivo_redline.name}"
-                    with open(os.path.join(CARPA_ARCHIVOS, nombre_redline), "wb") as f:
-                        f.write(archivo_redline.getbuffer())
+                if archivo_idi is not None:
+                    nombre_idi = f"IDI_{piquete_sel}_{archivo_idi.name}"
+                    with open(os.path.join(CARPA_ARCHIVOS, nombre_idi), "wb") as f:
+                        f.write(archivo_idi.getbuffer())
 
                 conn = conectar_db()
                 conn.execute("""
                     UPDATE piquetes SET 
-                        cantidad_aisladores=?, planialtimetria=?, idi=?, excavacion=?, 
+                        cantidad_aisladores=?, excavacion=?, 
                         verticalizado=?, montaje_riendas=?, montaje_aislador=?, tendido=?, 
-                        flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
+                        flechado=?, engrampado=?, fecha_montaje=?, doc_planialtimetria=?, doc_idi=?
                     WHERE piquete=?
                 """, (
-                    int(cant_aisladores_input), str(f_plani) if f_plani else None, str(f_idi) if f_idi else None, 
+                    int(cant_aisladores_input), 
                     str(f_excav) if f_excav else None, str(f_vert) if f_vert else None, str(f_riendas) if f_riendas else None,
                     str(f_aislador) if f_aislador else None, str(f_tendido) if f_tendido else None, str(f_flechado) if f_flechado else None, 
                     str(f_engramp) if f_engramp else None, str(f_montaje) if f_montaje else None, 
-                    str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, 
+                    str(nombre_plani) if nombre_plani else None, str(nombre_idi) if nombre_idi else None, 
                     piquete_sel
                 ))
                 conn.commit()
                 conn.close()
                 
                 st.session_state.proyecto_activo = tramo_sel
-                st.success(f"✔️ Historial, aisladores ({cant_aisladores_input} ud) y documentación de {piquete_sel} actualizados correctamente.")
+                st.success(f"✔️ Historial y documentos de referencia ({piquete_sel}) actualizados correctamente.")
                 st.rerun()
 
 # -------------------------------------------------------------------------
@@ -630,8 +609,6 @@ else:
         hitos_completados = sum(df_tramo[hito].notna().sum() for hito in HITOS_OBRA) if not df_tramo.empty else 0
         productividad_media = round(hitos_completados / dias_transcurridos, 2)
 
-        total_plani = df_tramo["planialtimetria"].notna().sum() if not df_tramo.empty else 0
-        total_idi = df_tramo["idi"].notna().sum() if not df_tramo.empty else 0
         total_excavados = df_tramo["excavacion"].notna().sum() if not df_tramo.empty else 0
         total_verticalizados = df_tramo["verticalizado"].notna().sum() if not df_tramo.empty else 0
         total_tendidos = df_tramo["tendido"].notna().sum() if not df_tramo.empty else 0
@@ -713,8 +690,8 @@ else:
         
         with col_bot2:
             df_frentes = pd.DataFrame({
-                "Frente Operativo": ["1. Planialtimetría", "2. IDI", "3. Excavación", "4. Verticalizado", "5. Tendido"],
-                "Piquetes Completados": [total_plani, total_idi, total_excavados, total_verticalizados, total_tendidos]
+                "Frente Operativo": ["1. Excavación", "2. Verticalizado", "3. Tendido"],
+                "Piquetes Completados": [total_excavados, total_verticalizados, total_tendidos]
             })
             fig_frentes = px.bar(df_frentes, x="Piquetes Completados", y="Frente Operativo", orientation='h',
                                  text="Piquetes Completados", color="Piquetes Completados", color_continuous_scale="Darkmint")
@@ -728,7 +705,7 @@ else:
         df_historico["fecha_montaje"] = pd.to_datetime(df_historico["fecha_montaje"], errors='coerce')
         df_historico = df_historico.dropna(subset=["fecha_montaje"]).sort_values("fecha_montaje")
 
-        col_sl1, col_sl2 = st.columns([2, 1])
+        col_sl1, _ = st.columns([2, 1])
         with col_sl1:
             dias_evaluacion = st.slider("Evaluación de ritmo reciente (días):", min_value=7, max_value=30, value=14, step=7)
 
@@ -792,7 +769,7 @@ else:
         for hito in HITOS_OBRA:
             df_mostrar[hito] = df_mostrar[hito].dt.strftime('%d/%m/%Y').fillna("-")
         
-        columnas_visibles = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "Avance_%", "anexo_montaje", "red_line"] + HITOS_OBRA
+        columnas_visibles = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "Avance_%", "doc_planialtimetria", "doc_idi"] + HITOS_OBRA
         st.markdown("---")
         st.markdown("### 📥 Exportar y Notificar Reportes de Trazabilidad")
         
