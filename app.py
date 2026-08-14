@@ -62,42 +62,51 @@ opcion = st.sidebar.radio("Ir a la pestaña:", [
     "📥 Migración Inicial (Excel)"
 ])
 
-# Estilos personalizados CSS para modernizar el Dashboard y optimizar espacio vertical
+# Estilos personalizados CSS Dashboard Moderno Dark
 st.markdown("""
     <style>
-    /* Reducir el margen superior del contenedor principal */
     .block-container {
-        padding-top: 1.5rem !important;
+        padding-top: 1.2rem !important;
         padding-bottom: 1rem !important;
     }
     .stApp {
-        background-color: #0e1117;
+        background-color: #0b0f17;
     }
     .kpi-card {
-        background: linear-gradient(135deg, #1f293d 0%, #111827 100%);
-        padding: 22px;
+        background: linear-gradient(145deg, #131b2a 0%, #0d131f 100%);
+        padding: 18px 20px;
         border-radius: 12px;
         border-left: 5px solid #3b82f6;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        margin-bottom: 15px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        border-right: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+        margin-bottom: 12px;
     }
     .kpi-title {
-        color: #9ca3af;
-        font-size: 14px;
-        font-weight: 600;
+        color: #94a3b8;
+        font-size: 12px;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.8px;
     }
     .kpi-value {
-        color: #ffffff;
-        font-size: 28px;
-        font-weight: 700;
-        margin-top: 5px;
+        color: #f8fafc;
+        font-size: 26px;
+        font-weight: 800;
+        margin-top: 4px;
     }
     .kpi-delta {
-        font-size: 13px;
-        margin-top: 5px;
-        font-weight: 500;
+        font-size: 12px;
+        margin-top: 4px;
+        font-weight: 600;
+    }
+    .status-card {
+        background: #111827;
+        padding: 16px;
+        border-radius: 10px;
+        border: 1px solid #1f2937;
+        height: 100%;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -152,6 +161,13 @@ def inicializar_db():
             tramo TEXT PRIMARY KEY,
             inicio TEXT,
             entrega TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS metas_ritmo (
+            tramo TEXT PRIMARY KEY,
+            ritmo_objetivo REAL,
+            fecha_meta TEXT
         )
     """)
     conn.commit()
@@ -543,12 +559,13 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 st.rerun()
 
 # -------------------------------------------------------------------------
-# MÓDULO 1: ANALÍTICA AVANZADA Y KPIS
+# MÓDULO 1: ANALÍTICA AVANZADA Y KPIS (REDISEÑADO & OPTIMIZADO)
 # -------------------------------------------------------------------------
 else:
     conn = conectar_db()
     df_obra = pd.read_sql_query("SELECT * FROM piquetes", conn)
     df_cronogramas = pd.read_sql_query("SELECT * FROM cronogramas", conn)
+    df_metas = pd.read_sql_query("SELECT * FROM metas_ritmo", conn)
     conn.close()
     
     if df_obra.empty:
@@ -572,52 +589,76 @@ else:
         tramo_sel = st.selectbox("Frente Operativo / Proyecto Seleccionado:", tramos_validos, index=idx_defecto)
         df_tramo = df_obra[df_obra["tramo"] == tramo_sel]
 
+        # Cargar configuración contractual y de metas grabada en BD
         c_actual = df_cronogramas[df_cronogramas["tramo"] == tramo_sel]
         val_ini = pd.to_datetime(c_actual["inicio"].iloc[0]).date() if not c_actual.empty else datetime.date.today()
         val_ent = pd.to_datetime(c_actual["entrega"].iloc[0]).date() if not c_actual.empty else (datetime.date.today() + datetime.timedelta(days=60))
 
-        with st.expander("⚙️ Ajustes Contractuales Avanzados de Plazos"):
-            col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
-            with col_f1: 
-                f_inicio = st.date_input("Fecha Inicio Contractual", val_ini, key=f"i_{tramo_sel}")
-            with col_f2: 
-                f_entrega = st.date_input("Fecha Fin de Obra", val_ent, key=f"e_{tramo_sel}")
-            with col_f3:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("Fijar Parámetros"):
-                    conn = conectar_db()
-                    conn.execute("INSERT OR REPLACE INTO cronogramas (tramo, inicio, entrega) VALUES (?, ?, ?)", (tramo_sel, str(f_inicio), str(f_entrega)))
-                    conn.commit()
-                    conn.close()
-                    st.session_state.proyecto_activo = tramo_sel
-                    st.rerun()
+        m_actual = df_metas[df_metas["tramo"] == tramo_sel]
+        val_ritmo_guardado = float(m_actual["ritmo_objetivo"].iloc[0]) if not m_actual.empty and pd.notna(m_actual["ritmo_objetivo"].iloc[0]) else None
 
-        inicio_base = pd.to_datetime(f_inicio)
-        entrega_base = pd.to_datetime(f_entrega)
+        # CÁLCULOS GENERALES
+        total_piquetes_tramo = len(df_tramo)
+        piquetes_completados_100 = len(df_tramo[df_tramo["Avance_%"] == 100])
+        piquetes_pendientes = max(0, total_piquetes_tramo - piquetes_completados_100)
+
+        inicio_base = pd.to_datetime(val_ini)
+        entrega_base = pd.to_datetime(val_ent)
         hoy = pd.to_datetime(datetime.date.today())
-        
+
+        dias_restantes = max(0, (entrega_base - hoy).days)
         dias_transcurridos = max(1, (hoy - inicio_base).days)
         avance_promedio = df_tramo["Avance_%"].mean() if not df_tramo.empty else 0
 
+        # Ritmo Requerido Teórico
+        if piquetes_pendientes == 0:
+            ritmo_requerido_piquetes = 0.0
+        elif dias_restantes <= 0:
+            ritmo_requerido_piquetes = 999.0
+        else:
+            ritmo_requerido_piquetes = round(piquetes_pendientes / dias_restantes, 2)
+
+        # panel de Ajustes Contractuales y Metas Persistentes
+        with st.expander("⚙️ Ajustes Contractuales y Metas de Ritmo / Fecha (Grabación en BD)"):
+            col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 2, 1.5])
+            with col_f1: 
+                f_inicio = st.date_input("Fecha Inicio Contractual", val_ini, key=f"i_{tramo_sel}")
+            with col_f2: 
+                f_entrega = st.date_input("Fecha Fin Contractual", val_ent, key=f"e_{tramo_sel}")
+            with col_f3:
+                ritmo_objetivo_input = st.number_input(
+                    "Meta Ritmo (piquetes/día):", 
+                    value=val_ritmo_guardado if val_ritmo_guardado is not None else float(ritmo_requerido_piquetes), 
+                    min_value=0.0, step=0.1, format="%.2f"
+                )
+            with col_f4:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("💾 Guardar Parametrización en BD", type="primary", use_container_width=True):
+                    conn = conectar_db()
+                    conn.execute("INSERT OR REPLACE INTO cronogramas (tramo, inicio, entrega) VALUES (?, ?, ?)", (tramo_sel, str(f_inicio), str(f_entrega)))
+                    conn.execute("INSERT OR REPLACE INTO metas_ritmo (tramo, ritmo_objetivo, fecha_meta) VALUES (?, ?, ?)", (tramo_sel, ritmo_objetivo_input, str(f_entrega)))
+                    conn.commit()
+                    conn.close()
+                    st.session_state.proyecto_activo = tramo_sel
+                    st.success("✔️ Parámetros contractuales y metas de ritmo guardados con éxito.")
+                    st.rerun()
+
+        # Proyecciones generales
         if avance_promedio <= 0.5:
             ritmo_diario = 0.0
             fin_proyectado = entrega_base
             desviacion_dias = 0
         else:
             ritmo_diario = avance_promedio / dias_transcurridos
-            dias_proyectados_totales = int(100 / ritmo_diario)
+            dias_proyectados_totales = int(100 / ritmo_diario) if ritmo_diario > 0 else 1825
             dias_proyectados_totales = min(dias_proyectados_totales, 1825)
             fin_proyectado = inicio_base + pd.Timedelta(days=dias_proyectados_totales)
             desviacion_dias = (fin_proyectado - entrega_base).days
-        
+
         hitos_completados = sum(df_tramo[hito].notna().sum() for hito in HITOS_OBRA) if not df_tramo.empty else 0
         productividad_media = round(hitos_completados / dias_transcurridos, 2)
 
-        total_excavados = df_tramo["excavacion"].notna().sum() if not df_tramo.empty else 0
-        total_verticalizados = df_tramo["verticalizado"].notna().sum() if not df_tramo.empty else 0
-        total_tendidos = df_tramo["tendido"].notna().sum() if not df_tramo.empty else 0
-
-        # --- TARJETAS KPIS SUPERIORES ---
+        # --- TARJETAS KPIS SUPERIORES (FILA 1) ---
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         
         with kpi1:
@@ -625,26 +666,26 @@ else:
                 <div class='kpi-card' style='border-left-color: #3b82f6;'>
                     <div class='kpi-title'>Avance Físico Consolidado</div>
                     <div class='kpi-value'>{int(avance_promedio)}%</div>
-                    <div class='kpi-delta' style='color: #a7f3d0;'>⚡ Eficiencia: {round(ritmo_diario, 2)}% / día</div>
+                    <div class='kpi-delta' style='color: #60a5fa;'>⚡ Ritmo global: {round(ritmo_diario, 2)}% / día</div>
                 </div>
             """, unsafe_allow_html=True)
 
         with kpi2:
             st.markdown(f"""
                 <div class='kpi-card' style='border-left-color: #10b981;'>
-                    <div class='kpi-title'>Productividad de Obra</div>
-                    <div class='kpi-value'>{productividad_media} <span style='font-size:14px;color:#9ca3af;'>hitos/día</span></div>
-                    <div class='kpi-delta' style='color: #9ca3af;'>Total hitos logrados: {hitos_completados}</div>
+                    <div class='kpi-title'>Productividad de Campo</div>
+                    <div class='kpi-value'>{productividad_media} <span style='font-size:13px;color:#94a3b8;'>hitos/día</span></div>
+                    <div class='kpi-delta' style='color: #34d399;'>Total hitos logrados: {hitos_completados}</div>
                 </div>
             """, unsafe_allow_html=True)
             
         with kpi3:
-            color_desv = "#f87171" if desviacion_dias > 0 else "#34d399"
+            color_desv = "#ef4444" if desviacion_dias > 0 else "#10b981"
             txt_desv = f"+ {desviacion_dias} días de retraso" if desviacion_dias > 0 else f"{abs(desviacion_dias)} días adelantado"
             st.markdown(f"""
                 <div class='kpi-card' style='border-left-color: {color_desv};'>
                     <div class='kpi-title'>Desviación Contractual</div>
-                    <div class='kpi-value'>{abs(desviacion_dias)} <span style='font-size:14px;color:#9ca3af;'>días</span></div>
+                    <div class='kpi-value'>{abs(desviacion_dias)} <span style='font-size:13px;color:#94a3b8;'>días</span></div>
                     <div class='kpi-delta' style='color: {color_desv};'>{txt_desv}</div>
                 </div>
             """, unsafe_allow_html=True)
@@ -652,58 +693,82 @@ else:
         with kpi4:
             st.markdown(f"""
                 <div class='kpi-card' style='border-left-color: #f59e0b;'>
-                    <div class='kpi-title'>Proyección de Cierre Real</div>
-                    <div class='kpi-value' style='font-size:22px; margin-top:12px;'>{fin_proyectado.strftime('%d/%m/%Y')}</div>
-                    <div class='kpi-delta' style='color: #9ca3af;'>Plazo Contrato: {entrega_base.strftime('%d/%m/%Y')}</div>
+                    <div class='kpi-title'>Proyección Cierre Real</div>
+                    <div class='kpi-value' style='font-size:22px;'>{fin_proyectado.strftime('%d/%m/%Y')}</div>
+                    <div class='kpi-delta' style='color: #94a3b8;'>Contrato: {entrega_base.strftime('%d/%m/%Y')}</div>
                 </div>
             """, unsafe_allow_html=True)
 
-        # --- DIAGNÓSTICO OPERATIVO DE METAS ---
-        st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:20px;'>⚠️ Diagnóstico Operativo de Flujo</h3>", unsafe_allow_html=True)
-        
-        dias_restantes = max(0, (entrega_base - hoy).days)
-        total_piquetes_tramo = len(df_tramo)
-        piquetes_completados_100 = len(df_tramo[df_tramo["Avance_%"] == 100])
-        piquetes_pendientes = max(0, total_piquetes_tramo - piquetes_completados_100)
-        
+        # --- SECCIÓN INTERMEDIA: METAS Y ESTADO OPERATIVO (FILA 2 EN 3 COLUMNAS) ---
+        st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:15px; margin-bottom:10px;'>🎯 Metas de Ritmo, Flujo de Campo y Estado</h3>", unsafe_allow_html=True)
+
+        total_excavados = df_tramo["excavacion"].notna().sum() if not df_tramo.empty else 0
+        total_verticalizados = df_tramo["verticalizado"].notna().sum() if not df_tramo.empty else 0
+        total_tendidos = df_tramo["tendido"].notna().sum() if not df_tramo.empty else 0
+
+        # Colorimetría del semáforo de metas
         if piquetes_pendientes == 0:
             alerta_color = "#10b981"
-            txt_meta = "0 piquetes"
-            txt_sub = "¡Frente 100% finalizado!"
-            ritmo_requerido_piquetes = 0.0
+            txt_meta = "0 piquetes/día"
+            txt_sub = "¡Frente 100% Finalizado!"
         elif dias_restantes <= 0:
             alerta_color = "#ef4444"
             txt_meta = f"{piquetes_pendientes} piquetes"
             txt_sub = "⚠️ Plazo contractual vencido."
-            ritmo_requerido_piquetes = 999.0
         else:
-            ritmo_requerido_piquetes = round(piquetes_pendientes / dias_restantes, 2)
             alerta_color = "#ef4444" if ritmo_requerido_piquetes > 2.0 else "#f59e0b"
-            txt_meta = f"{ritmo_requerido_piquetes} piquetes/día"
-            txt_sub = f"Faltan {piquetes_pendientes} piquetes en {dias_restantes} días rest."
+            txt_meta = f"{ritmo_requerido_piquetes} piq/día"
+            txt_sub = f"Faltan {piquetes_pendientes} piquetes ({dias_restantes} días rest.)"
 
-        col_bot1, col_bot2 = st.columns([1, 2])
-        with col_bot1:
+        col_mid1, col_mid2, col_mid3 = st.columns([1.1, 1.3, 1.1])
+
+        with col_mid1:
             st.markdown(f"""
-                <div class='kpi-card' style='border-left-color: {alerta_color}; background: #1e2230;'>
-                    <div class='kpi-title' style='color: {alerta_color};'>🎯 Meta para Cumplir Plazo</div>
-                    <div class='kpi-value' style='color: {alerta_color}; font-size:24px;'>{txt_meta}</div>
-                    <div class='kpi-delta' style='color: #9ca3af;'>{txt_sub}</div>
+                <div class='status-card' style='border-left: 5px solid {alerta_color};'>
+                    <div class='kpi-title' style='color:{alerta_color};'>🎯 Meta Requerida (Contrato)</div>
+                    <div class='kpi-value' style='color:{alerta_color}; font-size:24px;'>{txt_meta}</div>
+                    <div style='color: #94a3b8; font-size: 13px; margin-top:6px;'>{txt_sub}</div>
+                    <hr style='border-color: #1f2937; margin: 12px 0;'>
+                    <div style='font-size: 12px; color: #cbd5e1;'>
+                        <b>Ritmo Meta BD:</b> {val_ritmo_guardado if val_ritmo_guardado else ritmo_requerido_piquetes} piq/día
+                    </div>
                 </div>
             """, unsafe_allow_html=True)
-        
-        with col_bot2:
+
+        with col_mid2:
             df_frentes = pd.DataFrame({
                 "Frente Operativo": ["1. Excavación", "2. Verticalizado", "5. Tendido"],
                 "Piquetes Completados": [total_excavados, total_verticalizados, total_tendidos]
             })
-            fig_frentes = px.bar(df_frentes, x="Piquetes Completados", y="Frente Operativo", orientation='h',
-                                 text="Piquetes Completados", color="Piquetes Completados", color_continuous_scale="Darkmint")
-            fig_frentes.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=140, showlegend=False, coloraxis_showscale=False)
+            fig_frentes = px.bar(
+                df_frentes, x="Piquetes Completados", y="Frente Operativo", orientation='h',
+                text="Piquetes Completados", color="Piquetes Completados", 
+                color_continuous_scale="Tealgrn", template="plotly_dark"
+            )
+            fig_frentes.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10), height=145, 
+                showlegend=False, coloraxis_showscale=False,
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+            )
             st.plotly_chart(fig_frentes, use_container_width=True)
 
-        # --- PROYECCIÓN BASADA EN RITMO REAL DE CARGA DIARIA ---
-        st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:25px;'>📈 Proyección de Cumplimiento por Ritmo Real de Campo</h3>", unsafe_allow_html=True)
+        with col_mid3:
+            st.markdown(f"""
+                <div class='status-card' style='border-left: 5px solid #8b5cf6;'>
+                    <div class='kpi-title' style='color:#a78bfa;'>📊 Estado Operativo de Frente</div>
+                    <div style='color: #f8fafc; font-size: 14px; margin-top:8px;'>
+                        <b>Piquetes Totales:</b> {total_piquetes_tramo}<br>
+                        <b>Concluidos 100%:</b> {piquetes_completados_100}<br>
+                        <b>Pendientes:</b> {piquetes_pendientes}
+                    </div>
+                    <div style='margin-top:10px; font-size:12px; color:#94a3b8;'>
+                        Progreso General del Frente: <b>{int(avance_promedio)}%</b>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+        # --- FILA 3: PROYECCIÓN Y TENDENCIAS ---
+        st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:20px; margin-bottom:10px;'>📈 Trayectoria Proyectada vs Ritmo Real de Campo</h3>", unsafe_allow_html=True)
 
         df_historico = df_tramo[df_tramo["Avance_%"] == 100].copy()
         df_historico["fecha_montaje"] = pd.to_datetime(df_historico["fecha_montaje"], errors='coerce')
@@ -734,14 +799,19 @@ else:
             x="Fecha", 
             y="Piquetes Finalizados", 
             color="Trayectoria",
+            template="plotly_dark",
             color_discrete_map={
                 "Meta Necesaria (Contrato)": "#10b981", 
                 f"Tendencia Real ({ritmo_real_diario} piq/día)": "#ef4444" if ritmo_real_diario < ritmo_requerido_piquetes else "#3b82f6"
             }
         )
         
-        fig_proy.add_hline(y=total_piquetes_tramo, line_dash="dash", line_color="#9ca3af", annotation_text=f"Total Objetivo: {total_piquetes_tramo} piq.")
-        fig_proy.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=320)
+        fig_proy.add_hline(y=total_piquetes_tramo, line_dash="dash", line_color="#64748b", annotation_text=f"Total Objetivo: {total_piquetes_tramo} piq.")
+        fig_proy.update_layout(
+            margin=dict(l=10, r=10, t=20, b=10), height=300,
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
         st.plotly_chart(fig_proy, use_container_width=True)
 
         col_summary1, col_summary2 = st.columns(2)
@@ -755,20 +825,27 @@ else:
                 fecha_est_cierre = hoy + pd.Timedelta(days=dias_necesarios_extra)
                 st.error(f"🚨 **Proyección Cierre:** Al ritmo actual se finalizará el `{fecha_est_cierre.strftime('%d/%m/%Y')}`. Se requiere aumentar **+{round(ritmo_requerido_piquetes - ritmo_real_diario, 2)} piq/día**.")
 
-        # --- SIMULACIÓN DE PLAZO CONTRACTUAL (GANTT) ---
-        st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:20px;'>📊 Simulación de Plazo Contractual vs Proyección de Ritmo Actual</h3>", unsafe_allow_html=True)
+        # --- FILA 4: SIMULACIÓN DE PLAZO CONTRACTUAL (GANTT) ---
+        st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:20px; margin-bottom:10px;'>📊 Simulación de Plazo Contractual vs Proyección de Ritmo Actual</h3>", unsafe_allow_html=True)
         df_gantt = pd.DataFrame([
             {"Línea de Tiempo": "Plazo Comprometido por Contrato", "Inicio": inicio_base, "Fin": entrega_base, "Condición": "Contrato Base"},
             {"Línea de Tiempo": "Proyección por Avance de Campo", "Inicio": inicio_base, "Fin": fin_proyectado, "Condición": "Proyección Real de Obra"}
         ])
-        fig = px.timeline(df_gantt, x_start="Inicio", x_end="Fin", y="Línea de Tiempo", color="Condición", 
-                          color_discrete_map={"Contrato Base": "#1e3a8a", "Proyección Real de Obra": "#b45309"})
+        fig = px.timeline(
+            df_gantt, x_start="Inicio", x_end="Fin", y="Línea de Tiempo", color="Condición", 
+            template="plotly_dark",
+            color_discrete_map={"Contrato Base": "#1d4ed8", "Proyección Real de Obra": "#d97706"}
+        )
         fig.update_yaxes(autorange="reversed", title="")
-        fig.update_layout(margin=dict(l=20, r=20, t=10, b=20), height=180)
+        fig.update_layout(
+            margin=dict(l=20, r=20, t=10, b=20), height=170,
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
         st.plotly_chart(fig, use_container_width=True)
 
         # --- MATRIZ COMPLETA Y REPORTE ---
-        st.markdown("<h3 style='color:#ffffff; font-size:18px; margin-top:20px;'>📋 Matriz Completa de Trazabilidad</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:20px;'>📋 Matriz Completa de Trazabilidad</h3>", unsafe_allow_html=True)
         df_mostrar = df_tramo.copy()
         for hito in HITOS_OBRA:
             df_mostrar[hito] = df_mostrar[hito].dt.strftime('%d/%m/%Y').fillna("-")
