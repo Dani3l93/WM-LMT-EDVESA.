@@ -18,7 +18,7 @@ st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzad
 if "proyecto_activo" not in st.session_state:
     st.session_state.proyecto_activo = None
 
-# --- LISTA OFICIAL DE LAS 9 ETAPAS OPERATIVAS ---
+# --- LISTA OFICIAL DE LAS 9 ETAPAS OPERATIVAS (HITOS) ---
 HITOS_OBRA = [
     "excavacion", 
     "verticalizado", 
@@ -31,6 +31,18 @@ HITOS_OBRA = [
     "engrampado"
 ]
 
+NOMBRES_HITOS = {
+    "excavacion": "1. Excavación de Piquetes",
+    "verticalizado": "2. Verticalizado",
+    "desfile_de_poste": "3. Desfile de Poste",
+    "montaje_riendas": "4. Montaje de Riendas",
+    "armado_de_crucetas": "5. Armado de Crucetas",
+    "montaje_aislador": "6. Montaje de Aislador",
+    "tendido": "7. Tendido de Conductor",
+    "flechado": "8. Flechado",
+    "engrampado": "9. Engrampado"
+}
+
 # --- FUNCIÓN AUXILIAR PARA NORMALIZAR FECHAS AL CARGAR EXCEL ---
 def normalizar_fecha(val):
     if pd.isna(val) or val is None:
@@ -39,7 +51,6 @@ def normalizar_fecha(val):
     if val_str.lower() in ["nan", "none", "", "nat", "-"]:
         return None
     try:
-        # Intenta parsear la fecha y devolverla en formato ISO (YYYY-MM-DD)
         dt = pd.to_datetime(val_str, dayfirst=True, errors='coerce')
         if pd.notna(dt):
             return dt.strftime('%Y-%m-%d')
@@ -137,6 +148,13 @@ st.markdown("""
         border: 1px solid #1f2937;
         height: 100%;
     }
+    .hito-card {
+        background: #1e293b;
+        padding: 12px 15px;
+        border-radius: 8px;
+        border-left: 4px solid #38bdf8;
+        margin-bottom: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -154,7 +172,6 @@ def inicializar_db():
     cursor.execute("PRAGMA table_info(piquetes)")
     columnas = [col[1] for col in cursor.fetchall()]
     
-    # Reiniciar la DB si le faltan las nuevas columnas
     if len(columnas) > 0 and ("m3_excavacion" not in columnas or "armado_de_crucetas" not in columnas):
         conn.close()
         try: 
@@ -286,7 +303,6 @@ if opcion == "📥 Migración Inicial (Excel)":
                             except:
                                 m3_exc = 0.0
 
-                            # Mapeo flexible de fechas que soporta columnas exportadas previamente
                             f_excav = normalizar_fecha(get_val(row, "1. EXCAV PIQUETES", "EXCAV PIQUETES", "EXCAVACION", "EXCAV_PIQUETES"))
                             f_vert = normalizar_fecha(get_val(row, "2. VERTICALIZADO", "VERTICALIZADO"))
                             f_desf = normalizar_fecha(get_val(row, "3. DESFILE DE POSTE", "DESFILE DE POSTE", "DESFILE_DE_POSTE", "DESFILE"))
@@ -396,6 +412,24 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
                 st.markdown(f"""<div class='kpi-card' style='border-left-color: #06b6d4;'><div class='kpi-title'>📏 Metros Tendidos</div><div class='kpi-value'>{int(metros_tendidos)} / {int(total_metros)} m</div></div>""", unsafe_allow_html=True)
             with col6:
                 st.markdown(f"""<div class='kpi-card' style='border-left-color: #eab308;'><div class='kpi-title'>⛏️ Excavación (m³)</div><div class='kpi-value'>{m3_excavados:.1f} / {total_m3:.1f} m³</div></div>""", unsafe_allow_html=True)
+
+            # --- SECCIÓN DETALLADA DE HITOS Y ESTADOS ---
+            st.markdown("---")
+            st.markdown("### 🛠️ Estado de los 9 Hitos Operativos")
+            
+            cols_hitos = st.columns(3)
+            for idx, hito in enumerate(HITOS_OBRA):
+                cant_completada = df_proyecto[hito].notna().sum()
+                pct_hito = (cant_completada / total_piquetes * 100) if total_piquetes > 0 else 0
+                
+                with cols_hitos[idx % 3]:
+                    st.markdown(f"""
+                        <div class='hito-card'>
+                            <div style='font-size: 13px; font-weight: 700; color: #38bdf8;'>{NOMBRES_HITOS[hito]}</div>
+                            <div style='font-size: 20px; font-weight: 800; color: #ffffff; margin-top:2px;'>{cant_completada} / {total_piquetes} <span style='font-size:13px; color:#94a3b8;'>({int(pct_hito)}%)</span></div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    st.progress(int(pct_hito) / 100)
 
             st.markdown("---")
             st.subheader("🔍 Filtrar y Explorar Piquetes Cargados")
@@ -590,6 +624,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 m3_excavacion_input = st.number_input("⛏️ Volumen de Excavación (m³):", min_value=0.0, step=0.1, value=m3_excavacion_actual, format="%.2f")
 
             st.markdown("---")
+            st.markdown("##### 🛠️ Carga de Fechas para los 9 Hitos de Campo")
             col1, col2 = st.columns(2)
             with col1:
                 f_excav = st.date_input("1. EXCAV PIQUETES", value=convertir_a_fecha(p_info["excavacion"]))
@@ -738,7 +773,7 @@ else:
         hitos_completados = sum(df_tramo[hito].notna().sum() for hito in HITOS_OBRA) if not df_tramo.empty else 0
         productividad_media = round(hitos_completados / dias_transcurridos, 2)
 
-        # KPIS
+        # KPIS PRINCIPALES
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         
         with kpi1:
@@ -779,12 +814,48 @@ else:
                 </div>
             """, unsafe_allow_html=True)
 
-        st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:15px; margin-bottom:10px;'>🎯 Metas de Ritmo, Flujo de Campo y Estado</h3>", unsafe_allow_html=True)
+        # --- SECCIÓN GRÁFICA COMPLETA DE LOS 9 HITOS DE OBRA ---
+        st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:15px; margin-bottom:10px;'>🛠️ Desglose de Avance por Hito Operativo (Los 9 Hitos)</h3>", unsafe_allow_html=True)
+        
+        datos_hitos = []
+        for hito in HITOS_OBRA:
+            cant = df_tramo[hito].notna().sum()
+            pct = (cant / total_piquetes_tramo * 100) if total_piquetes_tramo > 0 else 0
+            datos_hitos.append({
+                "Hito": NOMBRES_HITOS[hito],
+                "Piquetes Executados": cant,
+                "Porcentaje": round(pct, 1)
+            })
+        
+        df_grafico_hitos = pd.DataFrame(datos_hitos)
 
-        total_excavados = df_tramo["excavacion"].notna().sum() if not df_tramo.empty else 0
-        total_verticalizados = df_tramo["verticalizado"].notna().sum() if not df_tramo.empty else 0
-        total_desfile = df_tramo["desfile_de_poste"].notna().sum() if not df_tramo.empty else 0
-        total_tendidos = df_tramo["tendido"].notna().sum() if not df_tramo.empty else 0
+        col_h1, col_h2 = st.columns([2, 1])
+        with col_h1:
+            fig_hitos_barras = px.bar(
+                df_grafico_hitos, 
+                x="Porcentaje", 
+                y="Hito", 
+                orientation='h',
+                text="Porcentaje", 
+                color="Porcentaje",
+                color_continuous_scale="Blues", 
+                template="plotly_dark",
+                labels={"Porcentaje": "% de Cumplimiento"}
+            )
+            fig_hitos_barras.update_traces(texttemplate='%{text}%', textposition='outside')
+            fig_hitos_barras.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10), height=340, 
+                showlegend=False, coloraxis_showscale=False,
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+            )
+            st.plotly_chart(fig_hitos_barras, use_container_width=True)
+
+        with col_h2:
+            st.markdown("##### 📌 Avance Unitario")
+            for h in datos_hitos:
+                st.markdown(f"**{h['Hito']}:** `{h['Piquetes Executados']}/{total_piquetes_tramo}` ({h['Porcentaje']}%)")
+
+        st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:15px; margin-bottom:10px;'>🎯 Metas de Ritmo, Flujo de Campo y Estado</h3>", unsafe_allow_html=True)
 
         if piquetes_pendientes == 0:
             alerta_color = "#10b981"
@@ -815,13 +886,9 @@ else:
             """, unsafe_allow_html=True)
 
         with col_mid2:
-            df_frentes = pd.DataFrame({
-                "Frente Operativo": ["1. Excavación", "2. Verticalizado", "3. Desfile Poste", "7. Tendido"],
-                "Piquetes Completados": [total_excavados, total_verticalizados, total_desfile, total_tendidos]
-            })
             fig_frentes = px.bar(
-                df_frentes, x="Piquetes Completados", y="Frente Operativo", orientation='h',
-                text="Piquetes Completados", color="Piquetes Completados", 
+                df_grafico_hitos.head(4), x="Piquetes Executados", y="Hito", orientation='h',
+                text="Piquetes Executados", color="Piquetes Executados", 
                 color_continuous_scale="Tealgrn", template="plotly_dark"
             )
             fig_frentes.update_layout(
@@ -924,7 +991,6 @@ else:
         st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:20px;'>📋 Matriz Completa de Trazabilidad</h3>", unsafe_allow_html=True)
         df_mostrar = df_tramo.copy()
 
-        # Nombres legibles e identificables para la exportación en Excel
         renombrar_columnas_export = {
             "excavacion": "1. EXCAV PIQUETES",
             "verticalizado": "2. VERTICALIZADO",
