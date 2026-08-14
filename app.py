@@ -642,9 +642,9 @@ elif opcion == "📝 Carga y Gestión de Campo":
             st.markdown("##### 📥 Carga / Actualización de Documentos Técnicos")
             col_arch1, col_arch2 = st.columns(2)
             with col_arch1:
-                archivo_anexo = st.file_uploader("Subir Nuevo ANEXO MONTAJE", type=["docx", "xlsx", "pdf", "xls"])
+                archivo_anexo = st.file_uploader("Subir Nuevo PLANIALTIMETRIA", type=["docx", "xlsx", "pdf", "xls"])
             with col_arch2:
-                archivo_redline = st.file_uploader("Subir Nuevo RED LINE", type=["docx", "xlsx", "pdf", "xls"])
+                archivo_redline = st.file_uploader("Subir Nuevo IDI", type=["docx", "xlsx", "pdf", "xls"])
 
             if st.form_submit_button("💾 Actualizar Historial de Trazabilidad y Archivos"):
                 nombre_anexo = p_info["anexo_montaje"]
