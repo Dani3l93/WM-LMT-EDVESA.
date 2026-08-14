@@ -18,12 +18,13 @@ st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzad
 if "proyecto_activo" not in st.session_state:
     st.session_state.proyecto_activo = None
 
-# --- LISTA OFICIAL DE LAS 8 ETAPAS OPERATIVAS ---
+# --- LISTA OFICIAL DE LAS 9 ETAPAS OPERATIVAS ---
 HITOS_OBRA = [
     "excavacion", 
     "verticalizado", 
     "desfile_de_poste",
     "montaje_riendas", 
+    "armado_de_crucetas",
     "montaje_aislador", 
     "tendido", 
     "flechado", 
@@ -137,8 +138,8 @@ def inicializar_db():
     cursor.execute("PRAGMA table_info(piquetes)")
     columnas = [col[1] for col in cursor.fetchall()]
     
-    # Reiniciar la DB si falta la columna m3_excavacion o las de migraciones previas
-    if len(columnas) > 0 and ("m3_excavacion" not in columnas or "desfile_de_poste" not in columnas or "metros_tendido" not in columnas):
+    # Reiniciar la DB si le faltan las nuevas columnas
+    if len(columnas) > 0 and ("m3_excavacion" not in columnas or "armado_de_crucetas" not in columnas):
         conn.close()
         try: 
             os.remove(DB_NAME)
@@ -160,11 +161,12 @@ def inicializar_db():
             excavacion TEXT,
             verticalizado TEXT,
             desfile_de_poste TEXT,
+            montaje_riendas TEXT,
+            armado_de_crucetas TEXT,
+            montaje_aislador TEXT,
             tendido TEXT,
             flechado TEXT,
             engrampado TEXT,
-            montaje_aislador TEXT,
-            montaje_riendas TEXT,
             fecha_montaje TEXT,
             tipo_de_equipo TEXT,
             anexo_montaje TEXT,
@@ -269,9 +271,9 @@ if opcion == "📥 Migración Inicial (Excel)":
                             conn.execute("""
                                 INSERT OR REPLACE INTO piquetes (
                                     tramo, piquete, tipo_estructura, longitud_poste, cantidad_aisladores, metros_tendido, m3_excavacion, excavacion, verticalizado, 
-                                    desfile_de_poste, tendido, flechado, engrampado, montaje_aislador, montaje_riendas, fecha_montaje, observacion_ofm
+                                    desfile_de_poste, montaje_riendas, armado_de_crucetas, montaje_aislador, tendido, flechado, engrampado, fecha_montaje, observacion_ofm
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 nombre_proyecto_manual,
                                 piquete_val,
@@ -283,11 +285,12 @@ if opcion == "📥 Migración Inicial (Excel)":
                                 get_val(row, "EXCAV PIQUETES"),
                                 get_val(row, "VERTICALIZADO"),
                                 get_val(row, "DESFILE DE POSTE") or get_val(row, "DESFILE_DE_POSTE") or get_val(row, "DESFILE"),
+                                get_val(row, "MONTAJE RIENDAS"),
+                                get_val(row, "ARMADO DE CRUCETAS") or get_val(row, "ARMADO DE CRUCETA") or get_val(row, "CRUCETAS"),
+                                get_val(row, "MONTAJE DE AISLADOR"),
                                 get_val(row, "TENDIDO DE CONDUCTOR"),
                                 get_val(row, "FLECHADO"),
                                 get_val(row, "ENGRAMPADO"),
-                                get_val(row, "MONTAJE DE AISLADOR"),
-                                get_val(row, "MONTAJE RIENDAS"),
                                 get_val(row, "FECHA DE LIBERACION"),
                                 get_val(row, "OBSERVACION")
                             ))
@@ -564,10 +567,11 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 f_desfile = st.date_input("3. DESFILE DE POSTE", value=convertir_a_fecha(p_info["desfile_de_poste"]))
                 f_riendas = st.date_input("4. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
             with col2:
-                f_aislador = st.date_input("5. MONTAJE DE AISLADOR (FECHA)", value=convertir_a_fecha(p_info["montaje_aislador"]))
-                f_tendido = st.date_input("6. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
-                f_flechado = st.date_input("7. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
-                f_engramp = st.date_input("8. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
+                f_crucetas = st.date_input("5. ARMADO DE CRUCETAS", value=convertir_a_fecha(p_info["armado_de_crucetas"])) # <--- NUEVO CAMPO
+                f_aislador = st.date_input("6. MONTAJE DE AISLADOR (FECHA)", value=convertir_a_fecha(p_info["montaje_aislador"]))
+                f_tendido = st.date_input("7. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
+                f_flechado = st.date_input("8. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
+                f_engramp = st.date_input("9. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
 
             st.markdown("---")
             f_montaje = st.date_input("Fecha Montaje / Liberación Final", value=convertir_a_fecha(p_info["fecha_montaje"]))
@@ -595,17 +599,17 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
                 conn = conectar_db()
                 conn.execute("""
-                    UPDATE piquetes SET cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
+                    UPDATE piquetes SET cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
                     WHERE piquete=?
                 """, (int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), str(f_excav) if f_excav else None, str(f_vert) if f_vert else None, str(f_desfile) if f_desfile else None, str(f_riendas) if f_riendas else None,
-                      str(f_aislador) if f_aislador else None, str(f_tendido) if f_tendido else None, str(f_flechado) if f_flechado else None, 
+                      str(f_crucetas) if f_crucetas else None, str(f_aislador) if f_aislador else None, str(f_tendido) if f_tendido else None, str(f_flechado) if f_flechado else None, 
                       str(f_engramp) if f_engramp else None, str(f_montaje) if f_montaje else None, 
                       str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, piquete_sel))
                 conn.commit()
                 conn.close()
                 
                 st.session_state.proyecto_activo = tramo_sel
-                st.success(f"✔️ Historial, aisladores ({cant_aisladores_input} ud), vano ({metros_tendido_input} m), excavación ({m3_excavacion_input:.2f} m³) y documentación de {piquete_sel} actualizados correctamente.")
+                st.success(f"✔️ Historial de {piquete_sel} actualizado correctamente.")
                 st.rerun()
 
 # -------------------------------------------------------------------------
@@ -782,7 +786,7 @@ else:
 
         with col_mid2:
             df_frentes = pd.DataFrame({
-                "Frente Operativo": ["1. Excavación", "2. Verticalizado", "3. Desfile Poste", "6. Tendido"],
+                "Frente Operativo": ["1. Excavación", "2. Verticalizado", "3. Desfile Poste", "7. Tendido"],
                 "Piquetes Completados": [total_excavados, total_verticalizados, total_desfile, total_tendidos]
             })
             fig_frentes = px.bar(
