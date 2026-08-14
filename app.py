@@ -22,7 +22,7 @@ if "proyecto_activo" not in st.session_state:
 HITOS_OBRA = [
     "excavacion", 
     "verticalizado", 
-    "desfile_de_poste",  # <--- NUEVA ETAPA AGREGADA
+    "desfile_de_poste",
     "montaje_riendas", 
     "montaje_aislador", 
     "tendido", 
@@ -137,8 +137,8 @@ def inicializar_db():
     cursor.execute("PRAGMA table_info(piquetes)")
     columnas = [col[1] for col in cursor.fetchall()]
     
-    # Si la tabla ya existe pero no contiene la columna 'desfile_de_poste', reiniciamos la DB
-    if len(columnas) > 0 and "desfile_de_poste" not in columnas:
+    # Reiniciar la DB si faltan columnas clave agregadas recientemente
+    if len(columnas) > 0 and ("desfile_de_poste" not in columnas or "metros_tendido" not in columnas):
         conn.close()
         try: 
             os.remove(DB_NAME)
@@ -155,6 +155,7 @@ def inicializar_db():
             tipo_estructura TEXT,
             longitud_poste TEXT,
             cantidad_aisladores INTEGER DEFAULT 3,
+            metros_tendido REAL DEFAULT 0,
             excavacion TEXT,
             verticalizado TEXT,
             desfile_de_poste TEXT,
@@ -252,18 +253,25 @@ if opcion == "📥 Migración Inicial (Excel)":
                             except:
                                 cant_aisl = 3
 
+                            m_tend = get_val(row, "METROS TENDIDO") or get_val(row, "METROS") or get_val(row, "VANO") or get_val(row, "DISTANCIA")
+                            try:
+                                m_tend = float(m_tend) if m_tend else 0.0
+                            except:
+                                m_tend = 0.0
+
                             conn.execute("""
                                 INSERT OR REPLACE INTO piquetes (
-                                    tramo, piquete, tipo_estructura, longitud_poste, cantidad_aisladores, excavacion, verticalizado, 
+                                    tramo, piquete, tipo_estructura, longitud_poste, cantidad_aisladores, metros_tendido, excavacion, verticalizado, 
                                     desfile_de_poste, tendido, flechado, engrampado, montaje_aislador, montaje_riendas, fecha_montaje, observacion_ofm
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 nombre_proyecto_manual,
                                 piquete_val,
                                 get_val(row, "TIPO ESTRUCTURA") or "S/D",
                                 get_val(row, "LONGITUD POSTE"),
                                 cant_aisl,
+                                m_tend,
                                 get_val(row, "EXCAV PIQUETES"),
                                 get_val(row, "VERTICALIZADO"),
                                 get_val(row, "DESFILE DE POSTE") or get_val(row, "DESFILE_DE_POSTE") or get_val(row, "DESFILE"),
@@ -328,7 +336,10 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
             total_aisladores = df_proyecto["cantidad_aisladores"].fillna(3).sum()
             aisladores_instalados = df_proyecto[df_proyecto["montaje_aislador"].notna()]["cantidad_aisladores"].fillna(3).sum()
 
-            col1, col2, col3, col4 = st.columns(4)
+            total_metros = df_proyecto["metros_tendido"].fillna(0).sum()
+            metros_tendidos = df_proyecto[df_proyecto["tendido"].notna()]["metros_tendido"].fillna(0).sum()
+
+            col1, col2, col3, col4, col5 = st.columns(5)
             with col1:
                 st.markdown(f"""<div class='kpi-card' style='border-left-color: #3b82f6;'><div class='kpi-title'>📍 Total Piquetes</div><div class='kpi-value'>{total_piquetes}</div></div>""", unsafe_allow_html=True)
             with col2:
@@ -337,6 +348,8 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
                 st.markdown(f"""<div class='kpi-card' style='border-left-color: #f59e0b;'><div class='kpi-title'>📈 % Avance Físico Promedio</div><div class='kpi-value'>{avance_promedio}%</div></div>""", unsafe_allow_html=True)
             with col4:
                 st.markdown(f"""<div class='kpi-card' style='border-left-color: #8b5cf6;'><div class='kpi-title'>🔌 Aisladores Instalados</div><div class='kpi-value'>{int(aisladores_instalados)} / {int(total_aisladores)}</div></div>""", unsafe_allow_html=True)
+            with col5:
+                st.markdown(f"""<div class='kpi-card' style='border-left-color: #06b6d4;'><div class='kpi-title'>📏 Metros Tendidos</div><div class='kpi-value'>{int(metros_tendidos)} / {int(total_metros)} m</div></div>""", unsafe_allow_html=True)
 
             st.markdown("---")
             st.subheader("🔍 Filtrar y Explorar Piquetes Cargados")
@@ -389,12 +402,17 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         total_aisladores_frente = df_inv["cantidad_aisladores"].fillna(3).sum()
         aisladores_colocados_frente = df_inv[df_inv["montaje_aislador"].notna()]["cantidad_aisladores"].fillna(3).sum()
         
-        m1, m2, m3 = st.columns(3)
+        total_m_frente = df_inv["metros_tendido"].fillna(0).sum()
+        m_colocados_frente = df_inv[df_inv["tendido"].notna()]["metros_tendido"].fillna(0).sum()
+
+        m1, m2, m3, m4 = st.columns(4)
         with m1:
             st.markdown(f"""<div class='kpi-card' style='border-left-color: #3b82f6;'><div class='kpi-title'>📍 Total Piquetes</div><div class='kpi-value'>{total_piquetes_frente}</div></div>""", unsafe_allow_html=True)
         with m2:
             st.markdown(f"""<div class='kpi-card' style='border-left-color: #8b5cf6;'><div class='kpi-title'>🔌 Aisladores Montados</div><div class='kpi-value'>{int(aisladores_colocados_frente)} / {int(total_aisladores_frente)}</div></div>""", unsafe_allow_html=True)
         with m3:
+            st.markdown(f"""<div class='kpi-card' style='border-left-color: #06b6d4;'><div class='kpi-title'>📏 Metros Conductor Tendidos</div><div class='kpi-value'>{int(m_colocados_frente)} / {int(total_m_frente)} m</div></div>""", unsafe_allow_html=True)
+        with m4:
             st.markdown(f"""<div class='kpi-card' style='border-left-color: #10b981;'><div class='kpi-title'>📈 % Avance Físico Promedio</div><div class='kpi-value'>{int(df_inv["Avance_%"].mean() if total_piquetes_frente > 0 else 0)}%</div></div>""", unsafe_allow_html=True)
         
         st.markdown("---")
@@ -405,6 +423,7 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
             "tipo_estructura": "🏗️ Tipos de Estructura",
             "longitud_poste": "📏 Longitud de Poste",
             "cantidad_aisladores": "🔌 Cantidad de Aisladores por Poste",
+            "metros_tendido": "📏 Metros de Vano / Tendido",
             "tipo_de_equipo": "⚙️ Equipos de Maniobra",
             "Avance_%": "📈 Porcentaje de Avance Individual"
         }
@@ -419,20 +438,20 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         if df_filtrado_grafico.empty:
             st.warning("No se detectaron registros válidos cargados para este parámetro específico.")
         else:
-            if col_real not in ["Avance_%", "cantidad_aisladores"]:
+            if col_real not in ["Avance_%", "cantidad_aisladores", "metros_tendido"]:
                 df_filtrado_grafico[col_real] = df_filtrado_grafico[col_real].astype(str)
                 
             df_frecuencia = df_filtrado_grafico[col_real].value_counts().reset_index()
             df_frecuencia.columns = [col_sel, "Cantidad de Piquetes"]
             
-            if col_real in ["Avance_%", "cantidad_aisladores"]:
+            if col_real in ["Avance_%", "cantidad_aisladores", "metros_tendido"]:
                 df_frecuencia = df_frecuencia.sort_values(by=col_sel)
             
             g_col1, g_col2 = st.columns([3, 2])
             with g_col1:
                 fig_inv = px.bar(df_frecuencia, x=col_sel, y="Cantidad de Piquetes", text="Cantidad de Piquetes", 
                                  color="Cantidad de Piquetes", color_continuous_scale="Viridis")
-                fig_inv.update_layout(xaxis_type='category' if col_real not in ["Avance_%", "cantidad_aisladores"] else 'linear')
+                fig_inv.update_layout(xaxis_type='category' if col_real not in ["Avance_%", "cantidad_aisladores", "metros_tendido"] else 'linear')
                 st.plotly_chart(fig_inv, use_container_width=True)
             with g_col2:
                 fig_donut = px.pie(df_frecuencia, names=col_sel, values="Cantidad de Piquetes", hole=0.4, 
@@ -440,7 +459,7 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
                 st.plotly_chart(fig_donut, use_container_width=True)
                 
         with st.expander("🔍 Ver Listado Detallado de este Frente"):
-            st.dataframe(df_inv[["piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "tipo_de_equipo", "Avance_%"]], use_container_width=True)
+            st.dataframe(df_inv[["piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "metros_tendido", "tipo_de_equipo", "Avance_%"]], use_container_width=True)
 
 # -------------------------------------------------------------------------
 # MÓDULO 4: CARGA Y GESTIÓN DE CAMPO
@@ -471,8 +490,9 @@ elif opcion == "📝 Carga y Gestión de Campo":
         
         l_poste = p_info["longitud_poste"] if p_info["longitud_poste"] and p_info["longitud_poste"] != "None" else "N/A"
         cant_aisl_actual = int(p_info["cantidad_aisladores"]) if pd.notna(p_info["cantidad_aisladores"]) else 3
+        metros_tendido_actual = float(p_info["metros_tendido"]) if pd.notna(p_info["metros_tendido"]) else 0.0
         
-        st.info(f"📏 **LONGITUD POSTE:** {l_poste} | 🏗️ **ESTRUCTURA:** {p_info['tipo_estructura']} | 🔌 **AISLADORES REQUERIDOS:** {cant_aisl_actual}")
+        st.info(f"📏 **LONGITUD POSTE:** {l_poste} | 🏗️ **ESTRUCTURA:** {p_info['tipo_estructura']} | 🔌 **AISLADORES REQUERIDOS:** {cant_aisl_actual} | 📏 **METROS VANO/TENDIDO:** {metros_tendido_actual} m")
         
         st.markdown("### 📂 Documentación Actualizada del Piquete")
         col_dl1, col_dl2 = st.columns(2)
@@ -506,18 +526,20 @@ elif opcion == "📝 Carga y Gestión de Campo":
                         return None
                 return None
 
-            st.markdown("##### ⚙️ Configuración y Cronograma de Hitos")
+            st.markdown("##### ⚙️ Configuración y Medición del Piquete")
             
             c_aisl1, c_aisl2 = st.columns(2)
             with c_aisl1:
                 cant_aisladores_input = st.number_input("🔌 Cantidad de Aisladores en esta Estructura:", min_value=1, max_value=20, value=cant_aisl_actual)
-            
+            with c_aisl2:
+                metros_tendido_input = st.number_input("📏 Metros de Tendido / Vano entre Postes (m):", min_value=0.0, step=1.0, value=metros_tendido_actual, format="%.2f")
+
             st.markdown("---")
             col1, col2 = st.columns(2)
             with col1:
                 f_excav = st.date_input("1. EXCAV PIQUETES", value=convertir_a_fecha(p_info["excavacion"]))
                 f_vert = st.date_input("2. VERTICALIZADO", value=convertir_a_fecha(p_info["verticalizado"]))
-                f_desfile = st.date_input("3. DESFILE DE POSTE", value=convertir_a_fecha(p_info["desfile_de_poste"]))  # <--- AGREGADO AQUÍ
+                f_desfile = st.date_input("3. DESFILE DE POSTE", value=convertir_a_fecha(p_info["desfile_de_poste"]))
                 f_riendas = st.date_input("4. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
             with col2:
                 f_aislador = st.date_input("5. MONTAJE DE AISLADOR (FECHA)", value=convertir_a_fecha(p_info["montaje_aislador"]))
@@ -551,9 +573,9 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
                 conn = conectar_db()
                 conn.execute("""
-                    UPDATE piquetes SET cantidad_aisladores=?, excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
+                    UPDATE piquetes SET cantidad_aisladores=?, metros_tendido=?, excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
                     WHERE piquete=?
-                """, (int(cant_aisladores_input), str(f_excav) if f_excav else None, str(f_vert) if f_vert else None, str(f_desfile) if f_desfile else None, str(f_riendas) if f_riendas else None,
+                """, (int(cant_aisladores_input), float(metros_tendido_input), str(f_excav) if f_excav else None, str(f_vert) if f_vert else None, str(f_desfile) if f_desfile else None, str(f_riendas) if f_riendas else None,
                       str(f_aislador) if f_aislador else None, str(f_tendido) if f_tendido else None, str(f_flechado) if f_flechado else None, 
                       str(f_engramp) if f_engramp else None, str(f_montaje) if f_montaje else None, 
                       str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, piquete_sel))
@@ -561,7 +583,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 conn.close()
                 
                 st.session_state.proyecto_activo = tramo_sel
-                st.success(f"✔️ Historial, aisladores ({cant_aisladores_input} ud) y documentación de {piquete_sel} actualizados correctamente.")
+                st.success(f"✔️ Historial, aisladores ({cant_aisladores_input} ud), vano ({metros_tendido_input} m) y documentación de {piquete_sel} actualizados correctamente.")
                 st.rerun()
 
 # -------------------------------------------------------------------------
@@ -848,7 +870,7 @@ else:
         for hito in HITOS_OBRA:
             df_mostrar[hito] = df_mostrar[hito].dt.strftime('%d/%m/%Y').fillna("-")
         
-        columnas_visibles = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "Avance_%", "anexo_montaje", "red_line"] + HITOS_OBRA
+        columnas_visibles = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "metros_tendido", "Avance_%", "anexo_montaje", "red_line"] + HITOS_OBRA
         st.markdown("---")
         st.markdown("### 📥 Exportar y Notificar Reportes de Trazabilidad")
         
