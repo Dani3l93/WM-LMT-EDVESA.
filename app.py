@@ -43,11 +43,36 @@ NOMBRES_HITOS = {
     "engrampado": "9. Engrampado"
 }
 
+# --- FUNCIÓN CENTRALIZADA PARA CÁLCULO DE AVANCE DINÁMICO (EXCLUYE N/A) ---
+def calcular_avance_piquete(row_piquete):
+    hitos_validos = 0
+    hitos_completados = 0
+    
+    for hito in HITOS_OBRA:
+        val = str(row_piquete.get(hito, "")).strip().upper()
+        
+        # Ignorar si está marcado como N/A o No Aplica
+        if val in ["N/A", "NO APLICA", "NA", "N/D"]:
+            continue
+            
+        hitos_validos += 1
+        
+        # Considerar completado si posee fecha o valor válido
+        if val and val not in ["NONE", "NAN", "", "NAT", "-"]:
+            hitos_completados += 1
+            
+    if hitos_validos == 0:
+        return 100.0 if hitos_completados == 0 else 0.0
+        
+    return round((hitos_completados / hitos_validos) * 100, 2)
+
 # --- FUNCIÓN AUXILIAR PARA NORMALIZAR FECHAS AL CARGAR EXCEL ---
 def normalizar_fecha(val):
     if pd.isna(val) or val is None:
         return None
     val_str = str(val).strip()
+    if val_str.upper() in ["N/A", "NO APLICA", "NA", "N/D"]:
+        return "N/A"
     if val_str.lower() in ["nan", "none", "", "nat", "-"]:
         return None
     try:
@@ -252,7 +277,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                 skip_rows = 0
                 
                 for i, row in df_test.iterrows():
-                    valores_fila = [str(val).strip().upper() for val in row.values if pd.notna(val)]
+                    valores_fila = [str(val).strip().upper().replace("_", " ") for val in row.values if pd.notna(val)]
                     if "PIQUETE" in valores_fila or "TIPO ESTRUCTURA" in valores_fila:
                         skip_rows = i
                         break
@@ -260,7 +285,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                 archivo_excel.seek(0)
                 df = pd.read_excel(archivo_excel, skiprows=skip_rows)
                 
-                df.columns = df.columns.astype(str).str.strip().str.upper()
+                df.columns = df.columns.astype(str).str.strip().str.upper().str.replace("_", " ")
                 df = df.loc[:, ~df.columns.duplicated()]
                 
                 if "PIQUETE" not in df.columns:
@@ -287,14 +312,24 @@ if opcion == "📥 Migración Inicial (Excel)":
                     for _, row in df.iterrows():
                         piquete_val = get_val(row, "PIQUETE")
                         if piquete_val:
-                            cant_aisl_raw = get_val(row, "CANTIDAD AISLADORES", "CANT_AISLADORES", "AISLADORES", "CANT. AISLADORES")
+                            cant_aisl_raw = get_val(
+                                row, 
+                                "CANTIDAD AISLADORES", 
+                                "CANT AISLADORES", 
+                                "CANT. AISLADORES", 
+                                "AISLADORES", 
+                                "CANT AISLADOR", 
+                                "CANTIDAD DE AISLADORES",
+                                "AISLADOR"
+                            )
                             if cant_aisl_raw is not None and str(cant_aisl_raw).strip() != "":
                                 try:
-                                    cant_aisl = int(float(cant_aisl_raw))
+                                    val_clean = str(cant_aisl_raw).replace(',', '.').strip()
+                                    cant_aisl = int(float(val_clean))
                                 except (ValueError, TypeError):
                                     cant_aisl = 0
                             else:
-                                cant_aisl = 0  # Si la celda está vacía, no lleva aislador
+                                cant_aisl = 0
 
                             m_tend = get_val(row, "METROS TENDIDO", "METROS", "VANO", "DISTANCIA")
                             try:
@@ -302,22 +337,22 @@ if opcion == "📥 Migración Inicial (Excel)":
                             except ValueError:
                                 m_tend = 0.0
 
-                            m3_exc = get_val(row, "M3 EXCAVACION", "M3_EXCAVACION", "VOLUMEN EXCAVACION")
+                            m3_exc = get_val(row, "M3 EXCAVACION", "M3 EXCAVACION", "VOLUMEN EXCAVACION")
                             try:
                                 m3_exc = float(m3_exc) if m3_exc is not None else 0.0
                             except ValueError:
                                 m3_exc = 0.0
 
-                            f_excav = normalizar_fecha(get_val(row, "1. EXCAV PIQUETES", "EXCAV PIQUETES", "EXCAVACION", "EXCAV_PIQUETES"))
+                            f_excav = normalizar_fecha(get_val(row, "1. EXCAV PIQUETES", "EXCAV PIQUETES", "EXCAVACION"))
                             f_vert = normalizar_fecha(get_val(row, "2. VERTICALIZADO", "VERTICALIZADO"))
-                            f_desf = normalizar_fecha(get_val(row, "3. DESFILE DE POSTE", "DESFILE DE POSTE", "DESFILE_DE_POSTE", "DESFILE"))
-                            f_riend = normalizar_fecha(get_val(row, "4. MONTAJE RIENDAS", "MONTAJE RIENDAS", "MONTAJE_RIENDAS", "RIENDAS"))
-                            f_cruc = normalizar_fecha(get_val(row, "5. ARMADO DE CRUCETAS", "ARMADO DE CRUCETAS", "ARMADO DE CRUCETA", "ARMADO_DE_CRUCETAS", "CRUCETAS"))
-                            f_aisl = normalizar_fecha(get_val(row, "6. MONTAJE DE AISLADOR (FECHA)", "MONTAJE DE AISLADOR", "MONTAJE_AISLADOR"))
+                            f_desf = normalizar_fecha(get_val(row, "3. DESFILE DE POSTE", "DESFILE DE POSTE", "DESFILE"))
+                            f_riend = normalizar_fecha(get_val(row, "4. MONTAJE RIENDAS", "MONTAJE RIENDAS", "RIENDAS"))
+                            f_cruc = normalizar_fecha(get_val(row, "5. ARMADO DE CRUCETAS", "ARMADO DE CRUCETAS", "ARMADO DE CRUCETA", "CRUCETAS"))
+                            f_aisl = normalizar_fecha(get_val(row, "6. MONTAJE DE AISLADOR (FECHA)", "MONTAJE DE AISLADOR", "MONTAJE AISLADOR"))
                             f_tend = normalizar_fecha(get_val(row, "7. TENDIDO DE CONDUCTOR", "TENDIDO DE CONDUCTOR", "TENDIDO"))
                             f_flec = normalizar_fecha(get_val(row, "8. FLECHADO", "FLECHADO"))
                             f_engr = normalizar_fecha(get_val(row, "9. ENGRAMPADO", "ENGRAMPADO"))
-                            f_liber = normalizar_fecha(get_val(row, "10. FECHA MONTAJE / LIBERACIÓN FINAL", "FECHA DE LIBERACION", "FECHA MONTAJE", "FECHA_MONTAJE"))
+                            f_liber = normalizar_fecha(get_val(row, "10. FECHA MONTAJE / LIBERACIÓN FINAL", "FECHA DE LIBERACION", "FECHA MONTAJE"))
 
                             conn.execute("""
                                 INSERT OR REPLACE INTO piquetes (
@@ -343,7 +378,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                                 f_flec,
                                 f_engr,
                                 f_liber,
-                                get_val(row, "OBSERVACION", "OBSERVACION_OFM")
+                                get_val(row, "OBSERVACION", "OBSERVACION OFM")
                             ))
                             registros_cargados += 1
                                 
@@ -352,7 +387,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                     
                     if registros_cargados > 0:
                         st.session_state.proyecto_activo = nombre_proyecto_manual
-                        st.success(f"✔️ ¡Migración exitosa! Se procesaron {registros_cargados} piquetes respetando los aisladores reales asignados.")
+                        st.success(f"✔️ ¡Migración exitosa! Se procesaron {registros_cargados} piquetes correctamente.")
                         st.rerun()
             except Exception as e:
                 st.error(f"❌ Error al procesar el Excel: {e}")
@@ -385,25 +420,20 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
         if proyecto_sel:
             df_proyecto = pd.read_sql_query("SELECT * FROM piquetes WHERE tramo = ?", conn, params=(proyecto_sel,))
             
-            peso_por_hito = 100 / len(HITOS_OBRA)
-            df_proyecto["Avance_%"] = 0
-            for hito in HITOS_OBRA:
-                df_proyecto["Avance_%"] += df_proyecto[hito].notna().astype(int) * peso_por_hito
-            df_proyecto["Avance_%"] = df_proyecto["Avance_%"].round(2)
+            df_proyecto["Avance_%"] = df_proyecto.apply(calcular_avance_piquete, axis=1)
 
             total_piquetes = len(df_proyecto)
             avance_promedio = int(df_proyecto["Avance_%"].mean()) if total_piquetes > 0 else 0
             completados = len(df_proyecto[df_proyecto["Avance_%"] >= 99.9])
 
-            # Suma real respetando valores de la columna
             total_aisladores = pd.to_numeric(df_proyecto["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
-            aisladores_instalados = pd.to_numeric(df_proyecto[df_proyecto["montaje_aislador"].notna()]["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
+            aisladores_instalados = pd.to_numeric(df_proyecto[df_proyecto["montaje_aislador"].notna() & (~df_proyecto["montaje_aislador"].astype(str).str.upper().isin(["N/A", "NO APLICA"]))]["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
 
             total_metros = df_proyecto["metros_tendido"].fillna(0).sum()
-            metros_tendidos = df_proyecto[df_proyecto["tendido"].notna()]["metros_tendido"].fillna(0).sum()
+            metros_tendidos = df_proyecto[df_proyecto["tendido"].notna() & (~df_proyecto["tendido"].astype(str).str.upper().isin(["N/A", "NO APLICA"]))]["metros_tendido"].fillna(0).sum()
 
             total_m3 = df_proyecto["m3_excavacion"].fillna(0).sum()
-            m3_excavados = df_proyecto[df_proyecto["excavacion"].notna()]["m3_excavacion"].fillna(0).sum()
+            m3_excavados = df_proyecto[df_proyecto["excavacion"].notna() & (~df_proyecto["excavacion"].astype(str).str.upper().isin(["N/A", "NO APLICA"]))]["m3_excavacion"].fillna(0).sum()
 
             col1, col2, col3, col4, col5, col6 = st.columns(6)
             with col1:
@@ -419,20 +449,21 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
             with col6:
                 st.markdown(f"""<div class='kpi-card' style='border-left-color: #eab308;'><div class='kpi-title'>⛏️ Excavación (m³)</div><div class='kpi-value'>{m3_excavados:.1f} / {total_m3:.1f} m³</div></div>""", unsafe_allow_html=True)
 
-            # --- SECCIÓN DETALLADA DE HITOS Y ESTADOS ---
             st.markdown("---")
             st.markdown("### 🛠️ Estado de los 9 Hitos Operativos")
             
             cols_hitos = st.columns(3)
             for idx, hito in enumerate(HITOS_OBRA):
-                cant_completada = df_proyecto[hito].notna().sum()
-                pct_hito = (cant_completada / total_piquetes * 100) if total_piquetes > 0 else 0
+                piquetes_aplicables = df_proyecto[~df_proyecto[hito].astype(str).str.upper().isin(["N/A", "NO APLICA", "NA", "N/D"])]
+                total_aplicable = len(piquetes_aplicables)
+                cant_completada = piquetes_aplicables[hito].notna().sum()
+                pct_hito = (cant_completada / total_aplicable * 100) if total_aplicable > 0 else 0
                 
                 with cols_hitos[idx % 3]:
                     st.markdown(f"""
                         <div class='hito-card'>
                             <div style='font-size: 13px; font-weight: 700; color: #38bdf8;'>{NOMBRES_HITOS[hito]}</div>
-                            <div style='font-size: 20px; font-weight: 800; color: #ffffff; margin-top:2px;'>{cant_completada} / {total_piquetes} <span style='font-size:13px; color:#94a3b8;'>({int(pct_hito)}%)</span></div>
+                            <div style='font-size: 20px; font-weight: 800; color: #ffffff; margin-top:2px;'>{cant_completada} / {total_aplicable} <span style='font-size:13px; color:#94a3b8;'>({int(pct_hito)}%)</span></div>
                         </div>
                     """, unsafe_allow_html=True)
                     st.progress(int(pct_hito) / 100)
@@ -468,11 +499,7 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
     if df_obra.empty:
         st.info("No hay datos cargados en el sistema de control.")
     else:
-        peso_por_hito = 100 / len(HITOS_OBRA)
-        df_obra["Avance_%"] = 0
-        for hito in HITOS_OBRA:
-            df_obra["Avance_%"] += df_obra[hito].notna().astype(int) * peso_por_hito
-        df_obra["Avance_%"] = df_obra["Avance_%"].round(2)
+        df_obra["Avance_%"] = df_obra.apply(calcular_avance_piquete, axis=1)
 
         tramos_validos = [t for t in df_obra["tramo"].dropna().unique() if str(t).strip().lower() != "nan" and str(t).strip() != ""]
         
@@ -485,13 +512,13 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         
         total_piquetes_frente = len(df_inv)
         total_aisladores_frente = pd.to_numeric(df_inv["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
-        aisladores_colocados_frente = pd.to_numeric(df_inv[df_inv["montaje_aislador"].notna()]["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
+        aisladores_colocados_frente = pd.to_numeric(df_inv[df_inv["montaje_aislador"].notna() & (~df_inv["montaje_aislador"].astype(str).str.upper().isin(["N/A", "NO APLICA"]))]["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
         
         total_m_frente = df_inv["metros_tendido"].fillna(0).sum()
-        m_colocados_frente = df_inv[df_inv["tendido"].notna()]["metros_tendido"].fillna(0).sum()
+        m_colocados_frente = df_inv[df_inv["tendido"].notna() & (~df_inv["tendido"].astype(str).str.upper().isin(["N/A", "NO APLICA"]))]["metros_tendido"].fillna(0).sum()
 
         total_m3_frente = df_inv["m3_excavacion"].fillna(0).sum()
-        m3_ejecutados_frente = df_inv[df_inv["excavacion"].notna()]["m3_excavacion"].fillna(0).sum()
+        m3_ejecutados_frente = df_inv[df_inv["excavacion"].notna() & (~df_inv["excavacion"].astype(str).str.upper().isin(["N/A", "NO APLICA"]))]["m3_excavacion"].fillna(0).sum()
 
         m1, m2, m3, m4, m5 = st.columns(5)
         with m1:
@@ -608,7 +635,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
         
         with st.form("form_trazabilidad_avanzado"):
             def convertir_a_fecha(val):
-                if val and val != "None" and val != "-" and val != "":
+                if val and str(val).strip().upper() not in ["NONE", "NAN", "N/A", "NO APLICA", "NA", "-", ""]:
                     try: 
                         return pd.to_datetime(val).date()
                     except: 
@@ -626,19 +653,35 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 m3_excavacion_input = st.number_input("⛏️ Volumen de Excavación (m³):", min_value=0.0, step=0.1, value=m3_excavacion_actual, format="%.2f")
 
             st.markdown("---")
-            st.markdown("##### 🛠️ Carga de Fechas para los 9 Hitos de Campo")
+            st.markdown("##### 🛠️ Carga de Fechas para los 9 Hitos de Campo (Marque 'N/A' si el hito no aplica)")
+            
+            def input_hito_con_na(label, clave_db):
+                val_db = str(p_info.get(clave_db, "")).strip()
+                es_na_previo = val_db.upper() in ["N/A", "NO APLICA", "NA"]
+                c_f, c_na = st.columns([3, 1])
+                with c_na:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    marcado_na = st.checkbox("N/A", value=es_na_previo, key=f"chk_na_{clave_db}")
+                with c_f:
+                    if marcado_na:
+                        st.text_input(label, value="N/A", disabled=True, key=f"inp_na_{clave_db}")
+                        return "N/A"
+                    else:
+                        fecha_val = st.date_input(label, value=convertir_a_fecha(val_db), key=f"inp_f_{clave_db}")
+                        return str(fecha_val) if fecha_val else None
+
             col1, col2 = st.columns(2)
             with col1:
-                f_excav = st.date_input("1. EXCAV PIQUETES", value=convertir_a_fecha(p_info["excavacion"]))
-                f_vert = st.date_input("2. VERTICALIZADO", value=convertir_a_fecha(p_info["verticalizado"]))
-                f_desfile = st.date_input("3. DESFILE DE POSTE", value=convertir_a_fecha(p_info["desfile_de_poste"]))
-                f_riendas = st.date_input("4. MONTAJE RIENDAS", value=convertir_a_fecha(p_info["montaje_riendas"]))
+                f_excav = input_hito_con_na("1. EXCAV PIQUETES", "excavacion")
+                f_vert = input_hito_con_na("2. VERTICALIZADO", "verticalizado")
+                f_desfile = input_hito_con_na("3. DESFILE DE POSTE", "desfile_de_poste")
+                f_riendas = input_hito_con_na("4. MONTAJE RIENDAS", "montaje_riendas")
             with col2:
-                f_crucetas = st.date_input("5. ARMADO DE CRUCETAS", value=convertir_a_fecha(p_info["armado_de_crucetas"]))
-                f_aislador = st.date_input("6. MONTAJE DE AISLADOR (FECHA)", value=convertir_a_fecha(p_info["montaje_aislador"]))
-                f_tendido = st.date_input("7. TENDIDO DE CONDUCTOR", value=convertir_a_fecha(p_info["tendido"]))
-                f_flechado = st.date_input("8. FLECHADO", value=convertir_a_fecha(p_info["flechado"]))
-                f_engramp = st.date_input("9. ENGRAMPADO", value=convertir_a_fecha(p_info["engrampado"]))
+                f_crucetas = input_hito_con_na("5. ARMADO DE CRUCETAS", "armado_de_crucetas")
+                f_aislador = input_hito_con_na("6. MONTAJE DE AISLADOR (FECHA)", "montaje_aislador")
+                f_tendido = input_hito_con_na("7. TENDIDO DE CONDUCTOR", "tendido")
+                f_flechado = input_hito_con_na("8. FLECHADO", "flechado")
+                f_engramp = input_hito_con_na("9. ENGRAMPADO", "engrampado")
 
             st.markdown("---")
             f_montaje = st.date_input("Fecha Montaje / Liberación Final", value=convertir_a_fecha(p_info["fecha_montaje"]))
@@ -668,10 +711,10 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 conn.execute("""
                     UPDATE piquetes SET cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
                     WHERE piquete=?
-                """, (int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), str(f_excav) if f_excav else None, str(f_vert) if f_vert else None, str(f_desfile) if f_desfile else None, str(f_riendas) if f_riendas else None,
-                      str(f_crucetas) if f_crucetas else None, str(f_aislador) if f_aislador else None, str(f_tendido) if f_tendido else None, str(f_flechado) if f_flechado else None, 
-                      str(f_engramp) if f_engramp else None, str(f_montaje) if f_montaje else None, 
-                      str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, piquete_sel))
+                """, (int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), 
+                      f_excav, f_vert, f_desfile, f_riendas, f_crucetas, f_aislador, f_tendido, f_flechado, f_engramp, 
+                      str(f_montaje) if f_montaje else None, str(nombre_anexo) if nombre_anexo else None, 
+                      str(nombre_redline) if nombre_redline else None, piquete_sel))
                 conn.commit()
                 conn.close()
                 
@@ -692,14 +735,7 @@ else:
     if df_obra.empty:
         st.info("No existen registros de obra para procesar analíticas. Vaya al módulo de Migración.")
     else:
-        for hito in HITOS_OBRA:
-            df_obra[hito] = pd.to_datetime(df_obra[hito], errors='coerce')
-            
-        peso_por_hito = 100 / len(HITOS_OBRA)
-        df_obra["Avance_%"] = 0
-        for hito in HITOS_OBRA:
-            df_obra["Avance_%"] += df_obra[hito].notna().astype(int) * peso_por_hito
-        df_obra["Avance_%"] = df_obra["Avance_%"].round(2)
+        df_obra["Avance_%"] = df_obra.apply(calcular_avance_piquete, axis=1)
 
         tramos_validos = [t for t in df_obra["tramo"].dropna().unique() if str(t).strip().lower() != "nan" and str(t).strip() != ""]
         
@@ -717,7 +753,6 @@ else:
         m_actual = df_metas[df_metas["tramo"] == tramo_sel]
         val_ritmo_guardado = float(m_actual["ritmo_objetivo"].iloc[0]) if not m_actual.empty and pd.notna(m_actual["ritmo_objetivo"].iloc[0]) else None
 
-        # CÁLCULOS GENERALES
         total_piquetes_tramo = len(df_tramo)
         piquetes_completados_100 = len(df_tramo[df_tramo["Avance_%"] >= 99.9])
         piquetes_pendientes = max(0, total_piquetes_tramo - piquetes_completados_100)
@@ -772,10 +807,12 @@ else:
             fin_proyectado = inicio_base + pd.Timedelta(days=dias_proyectados_totales)
             desviacion_dias = (fin_proyectado - entrega_base).days
 
-        hitos_completados = sum(df_tramo[hito].notna().sum() for hito in HITOS_OBRA) if not df_tramo.empty else 0
+        hitos_completados = 0
+        for hito in HITOS_OBRA:
+            hitos_completados += df_tramo[df_tramo[hito].notna() & (~df_tramo[hito].astype(str).str.upper().isin(["N/A", "NO APLICA"]))].shape[0]
+
         productividad_media = round(hitos_completados / dias_transcurridos, 2)
 
-        # KPIS PRINCIPALES
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         
         with kpi1:
@@ -816,16 +853,18 @@ else:
                 </div>
             """, unsafe_allow_html=True)
 
-        # --- SECCIÓN GRÁFICA COMPLETA DE LOS 9 HITOS DE OBRA ---
         st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:15px; margin-bottom:10px;'>🛠️ Desglose de Avance por Hito Operativo (Los 9 Hitos)</h3>", unsafe_allow_html=True)
         
         datos_hitos = []
         for hito in HITOS_OBRA:
-            cant = df_tramo[hito].notna().sum()
-            pct = (cant / total_piquetes_tramo * 100) if total_piquetes_tramo > 0 else 0
+            piquetes_aplicables = df_tramo[~df_tramo[hito].astype(str).str.upper().isin(["N/A", "NO APLICA", "NA", "N/D"])]
+            tot_ap = len(piquetes_aplicables)
+            cant = piquetes_aplicables[hito].notna().sum()
+            pct = (cant / tot_ap * 100) if tot_ap > 0 else 0
             datos_hitos.append({
                 "Hito": NOMBRES_HITOS[hito],
                 "Piquetes Executados": cant,
+                "Total Aplicable": tot_ap,
                 "Porcentaje": round(pct, 1)
             })
         
@@ -855,7 +894,7 @@ else:
         with col_h2:
             st.markdown("##### 📌 Avance Unitario")
             for h in datos_hitos:
-                st.markdown(f"**{h['Hito']}:** `{h['Piquetes Executados']}/{total_piquetes_tramo}` ({h['Porcentaje']}%)")
+                st.markdown(f"**{h['Hito']}:** `{h['Piquetes Executados']}/{h['Total Aplicable']}` ({h['Porcentaje']}%)")
 
         st.markdown("<h3 style='color:#f8fafc; font-size:17px; margin-top:15px; margin-bottom:10px;'>🎯 Metas de Ritmo, Flujo de Campo y Estado</h3>", unsafe_allow_html=True)
 
@@ -1007,7 +1046,7 @@ else:
         }
 
         for hito in HITOS_OBRA:
-            df_mostrar[hito] = df_mostrar[hito].dt.strftime('%d/%m/%Y').fillna("-")
+            df_mostrar[hito] = df_mostrar[hito].apply(lambda x: "N/A" if str(x).upper() in ["N/A", "NO APLICA"] else (pd.to_datetime(x).strftime('%d/%m/%Y') if pd.notna(pd.to_datetime(x, errors='coerce')) else "-"))
             
         df_exportar = df_mostrar.rename(columns=renombrar_columnas_export)
         columnas_export_orden = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "metros_tendido", "m3_excavacion", "Avance_%", "anexo_montaje", "red_line"] + list(renombrar_columnas_export.values())
