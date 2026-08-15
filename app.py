@@ -188,7 +188,7 @@ def inicializar_db():
             piquete TEXT UNIQUE,
             tipo_estructura TEXT,
             longitud_poste TEXT,
-            cantidad_aisladores INTEGER DEFAULT 3,
+            cantidad_aisladores INTEGER DEFAULT 0,
             metros_tendido REAL DEFAULT 0,
             m3_excavacion REAL DEFAULT 0,
             excavacion TEXT,
@@ -238,7 +238,7 @@ if opcion == "📥 Migración Inicial (Excel)":
     st.markdown("Cargue el archivo Excel inicial para estructurar los piquetes y frentes de trabajo de forma limpia.")
     
     archivo_excel = st.file_uploader("Suba la planilla de Trazabilidad (.xlsx)", type=["xlsx"], key="uploader_excel_maestro")
-    nombre_proyecto_manual = st.text_input("Ingrese el Nombre del Proyecto / Frente (Ej: WM, LTM):", value="WM", key="input_nombre_proyecto")
+    nombre_proyecto_manual = st.text_input("Ingrese el Nombre del Proyecto / Frente (Ej: WM, LTM):", value="WM-LMT2026", key="input_nombre_proyecto")
     
     boton_procesar = st.button("🔄 Procesar y Migrar Datos a la Base", type="primary")
 
@@ -287,14 +287,14 @@ if opcion == "📥 Migración Inicial (Excel)":
                     for _, row in df.iterrows():
                         piquete_val = get_val(row, "PIQUETE")
                         if piquete_val:
-                            cant_aisl_raw = get_val(row, "CANTIDAD AISLADORES", "CANT_AISLADORES", "AISLADORES")
+                            cant_aisl_raw = get_val(row, "CANTIDAD AISLADORES", "CANT_AISLADORES", "AISLADORES", "CANT. AISLADORES")
                             if cant_aisl_raw is not None and str(cant_aisl_raw).strip() != "":
                                 try:
                                     cant_aisl = int(float(cant_aisl_raw))
-                                except ValueError:
-                                    cant_aisl = 3
+                                except (ValueError, TypeError):
+                                    cant_aisl = 0
                             else:
-                                cant_aisl = 3
+                                cant_aisl = 0  # Si la celda está vacía, no lleva aislador
 
                             m_tend = get_val(row, "METROS TENDIDO", "METROS", "VANO", "DISTANCIA")
                             try:
@@ -352,7 +352,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                     
                     if registros_cargados > 0:
                         st.session_state.proyecto_activo = nombre_proyecto_manual
-                        st.success(f"✔️ ¡Migración exitosa! Se procesaron y guardaron {registros_cargados} piquetes correctamente.")
+                        st.success(f"✔️ ¡Migración exitosa! Se procesaron {registros_cargados} piquetes respetando los aisladores reales asignados.")
                         st.rerun()
             except Exception as e:
                 st.error(f"❌ Error al procesar el Excel: {e}")
@@ -395,7 +395,7 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
             avance_promedio = int(df_proyecto["Avance_%"].mean()) if total_piquetes > 0 else 0
             completados = len(df_proyecto[df_proyecto["Avance_%"] >= 99.9])
 
-            # Respetar explícitamente valores 0
+            # Suma real respetando valores de la columna
             total_aisladores = pd.to_numeric(df_proyecto["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
             aisladores_instalados = pd.to_numeric(df_proyecto[df_proyecto["montaje_aislador"].notna()]["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
 
@@ -577,7 +577,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
         conn.close()
         
         l_poste = p_info["longitud_poste"] if p_info["longitud_poste"] and p_info["longitud_poste"] != "None" else "N/A"
-        cant_aisl_actual = int(p_info["cantidad_aisladores"]) if pd.notna(p_info["cantidad_aisladores"]) else 3
+        cant_aisl_actual = int(p_info["cantidad_aisladores"]) if pd.notna(p_info["cantidad_aisladores"]) else 0
         metros_tendido_actual = float(p_info["metros_tendido"]) if pd.notna(p_info["metros_tendido"]) else 0.0
         m3_excavacion_actual = float(p_info["m3_excavacion"]) if pd.notna(p_info["m3_excavacion"]) else 0.0
         
