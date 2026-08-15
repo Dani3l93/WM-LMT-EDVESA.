@@ -277,31 +277,35 @@ if opcion == "📥 Migración Inicial (Excel)":
                                 val = row.get(c)
                                 if isinstance(val, pd.Series):
                                     val = val.iloc[0]
-                                if pd.notna(val) and str(val).strip().lower() not in ["nan", "none", "", "nat"]:
-                                    return str(val).strip()
+                                if pd.notna(val):
+                                    val_str = str(val).strip()
+                                    if val_str.lower() not in ["nan", "none", "", "nat"]:
+                                        return val_str
                         return None
 
                     registros_cargados = 0
                     for _, row in df.iterrows():
                         piquete_val = get_val(row, "PIQUETE")
                         if piquete_val:
-                            cant_aisl = get_val(row, "CANTIDAD AISLADORES", "CANT_AISLADORES", "AISLADORES")
-                            try:
-                                # Respetar explícitamente el 0 y solo asignar 3 a valores vacíos/nulos
-                                cant_aisl = int(float(cant_aisl)) if cant_aisl is not None else 3
-                            except:
+                            cant_aisl_raw = get_val(row, "CANTIDAD AISLADORES", "CANT_AISLADORES", "AISLADORES")
+                            if cant_aisl_raw is not None and str(cant_aisl_raw).strip() != "":
+                                try:
+                                    cant_aisl = int(float(cant_aisl_raw))
+                                except ValueError:
+                                    cant_aisl = 3
+                            else:
                                 cant_aisl = 3
 
                             m_tend = get_val(row, "METROS TENDIDO", "METROS", "VANO", "DISTANCIA")
                             try:
-                                m_tend = float(m_tend) if m_tend else 0.0
-                            except:
+                                m_tend = float(m_tend) if m_tend is not None else 0.0
+                            except ValueError:
                                 m_tend = 0.0
 
                             m3_exc = get_val(row, "M3 EXCAVACION", "M3_EXCAVACION", "VOLUMEN EXCAVACION")
                             try:
-                                m3_exc = float(m3_exc) if m3_exc else 0.0
-                            except:
+                                m3_exc = float(m3_exc) if m3_exc is not None else 0.0
+                            except ValueError:
                                 m3_exc = 0.0
 
                             f_excav = normalizar_fecha(get_val(row, "1. EXCAV PIQUETES", "EXCAV PIQUETES", "EXCAVACION", "EXCAV_PIQUETES"))
@@ -391,9 +395,9 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
             avance_promedio = int(df_proyecto["Avance_%"].mean()) if total_piquetes > 0 else 0
             completados = len(df_proyecto[df_proyecto["Avance_%"] >= 99.9])
 
-            # Manejo estricto para respetar el valor 0 de aisladores
-            total_aisladores = pd.to_numeric(df_proyecto["cantidad_aisladores"], errors='coerce').fillna(3).sum()
-            aisladores_instalados = pd.to_numeric(df_proyecto[df_proyecto["montaje_aislador"].notna()]["cantidad_aisladores"], errors='coerce').fillna(3).sum()
+            # Respetar explícitamente valores 0
+            total_aisladores = pd.to_numeric(df_proyecto["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
+            aisladores_instalados = pd.to_numeric(df_proyecto[df_proyecto["montaje_aislador"].notna()]["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
 
             total_metros = df_proyecto["metros_tendido"].fillna(0).sum()
             metros_tendidos = df_proyecto[df_proyecto["tendido"].notna()]["metros_tendido"].fillna(0).sum()
@@ -480,8 +484,8 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         df_inv = df_obra[df_obra["tramo"] == tramo_sel].copy()
         
         total_piquetes_frente = len(df_inv)
-        total_aisladores_frente = pd.to_numeric(df_inv["cantidad_aisladores"], errors='coerce').fillna(3).sum()
-        aisladores_colocados_frente = pd.to_numeric(df_inv[df_inv["montaje_aislador"].notna()]["cantidad_aisladores"], errors='coerce').fillna(3).sum()
+        total_aisladores_frente = pd.to_numeric(df_inv["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
+        aisladores_colocados_frente = pd.to_numeric(df_inv[df_inv["montaje_aislador"].notna()]["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
         
         total_m_frente = df_inv["metros_tendido"].fillna(0).sum()
         m_colocados_frente = df_inv[df_inv["tendido"].notna()]["metros_tendido"].fillna(0).sum()
@@ -504,7 +508,6 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         st.markdown("---")
         st.markdown("### 📊 Auditoría y Estado de Parámetros por Columna")
         
-        # Opciones filtradas exclusivamente para parámetros significativos en auditoría
         columnas_analizar = {
             "longitud_poste": "📏 Longitud de Poste",
             "cantidad_aisladores": "🔌 Cantidad de Aisladores por Poste",
@@ -616,7 +619,6 @@ elif opcion == "📝 Carga y Gestión de Campo":
             
             c_aisl1, c_aisl2, c_aisl3 = st.columns(3)
             with c_aisl1:
-                # Se permite min_value=0 para dar soporte a piquetes con 0 aisladores
                 cant_aisladores_input = st.number_input("🔌 Cantidad de Aisladores:", min_value=0, max_value=20, value=cant_aisl_actual)
             with c_aisl2:
                 metros_tendido_input = st.number_input("📏 Metros de Tendido / Vano (m):", min_value=0.0, step=1.0, value=metros_tendido_actual, format="%.2f")
