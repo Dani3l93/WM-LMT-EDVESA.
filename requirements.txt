@@ -3,3 +3,5 @@ pandas
 plotly
 xlsxwriter
 openpyxl
+google-api-python-client
+google-auth
