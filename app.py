@@ -10,7 +10,67 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import streamlit.components.v1 as components
+import io
+import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
+DRIVE_FOLDER_ID = "1Gv2m6_uBDjQkM4QluwO_Zmhjdw4LM85X"
+DB_FILE_NAME = "obra_trazabilidad.db"
+
+def get_drive_service():
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict, scopes=['https://www.googleapis.com/auth/drive']
+    )
+    return build('drive', 'v3', credentials=creds)
+
+def download_db_from_drive():
+    try:
+        service = get_drive_service()
+        query = f"name = '{DB_FILE_NAME}' and trashed = false"
+        if DRIVE_FOLDER_ID:
+            query += f" and '{DRIVE_FOLDER_ID}' in parents"
+            
+        results = service.files().list(q=query, fields="files(id, name)").execute()
+        files = results.get('files', [])
+        
+        if files:
+            file_id = files[0]['id']
+            request = service.files().get_media(fileId=file_id)
+            with open(DB_FILE_NAME, 'wb') as f:
+                downloader = MediaIoBaseDownload(f, request)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+            print("Base de datos descargada de Drive correctamente.")
+    except Exception as e:
+        print(f"Error al descargar de Drive: {e}")
+
+def upload_db_to_drive():
+    try:
+        service = get_drive_service()
+        query = f"name = '{DB_FILE_NAME}' and trashed = false"
+        if DRIVE_FOLDER_ID:
+            query += f" and '{DRIVE_FOLDER_ID}' in parents"
+            
+        results = service.files().list(q=query, fields="files(id, name)").execute()
+        files = results.get('files', [])
+        
+        media = MediaFileUpload(DB_FILE_NAME, mimetype='application/x-sqlite3', resumable=True)
+        
+        if files:
+            file_id = files[0]['id']
+            service.files().update(fileId=file_id, media_body=media).execute()
+        else:
+            file_metadata = {'name': DB_FILE_NAME}
+            if DRIVE_FOLDER_ID:
+                file_metadata['parents'] = [DRIVE_FOLDER_ID]
+            service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        print("Base de datos subida a Drive correctamente.")
+    except Exception as e:
+        print(f"Error al subir a Drive: {e}")
 # Configuración de página
 st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzado", page_icon="⚡")
 
