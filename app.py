@@ -10,7 +10,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import streamlit.components.v1 as components
-import io
 import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -71,6 +70,7 @@ def upload_db_to_drive():
         print("Base de datos subida a Drive correctamente.")
     except Exception as e:
         print(f"Error al subir a Drive: {e}")
+
 # Configuración de página
 st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzado", page_icon="⚡")
 
