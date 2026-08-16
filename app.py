@@ -257,7 +257,7 @@ def inicializar_db():
     cursor.execute("PRAGMA table_info(piquetes)")
     columnas = [col[1] for col in cursor.fetchall()]
     
-    if len(columnas) > 0 and ("m3_excavacion" not in columnas or "armado_de_crucetas" not in columnas):
+    if len(columnas) > 0 and ("cabezal" not in columnas or "armado_de_crucetas" not in columnas):
         conn.close()
         try: 
             os.remove(DB_NAME)
@@ -272,6 +272,7 @@ def inicializar_db():
             tramo TEXT,
             piquete TEXT UNIQUE,
             tipo_estructura TEXT,
+            cabezal TEXT,
             longitud_poste TEXT,
             cantidad_aisladores INTEGER DEFAULT 0,
             metros_tendido REAL DEFAULT 0,
@@ -416,14 +417,15 @@ if opcion == "📥 Migración Inicial (Excel)":
 
                             conn.execute("""
                                 INSERT OR REPLACE INTO piquetes (
-                                    tramo, piquete, tipo_estructura, longitud_poste, cantidad_aisladores, metros_tendido, m3_excavacion, excavacion, verticalizado, 
+                                    tramo, piquete, tipo_estructura, cabezal, longitud_poste, cantidad_aisladores, metros_tendido, m3_excavacion, excavacion, verticalizado, 
                                     desfile_de_poste, montaje_riendas, armado_de_crucetas, montaje_aislador, tendido, flechado, engrampado, fecha_montaje, observacion_ofm
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 nombre_proyecto_manual,
                                 piquete_val,
                                 get_val(row, "TIPO ESTRUCTURA") or "S/D",
+                                get_val(row, "CABEZAL") or "S/D",
                                 get_val(row, "LONGITUD POSTE"),
                                 cant_aisl,
                                 m_tend,
@@ -596,6 +598,7 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         st.markdown("### 📊 Auditoría y Estado de Parámetros por Columna")
         
         columnas_analizar = {
+            "cabezal": "🧩 Cabezal de Estructura",
             "longitud_poste": "📏 Longitud de Poste",
             "cantidad_aisladores": "🔌 Cantidad de Aisladores por Poste",
             "metros_tendido": "📏 Metros de Vano / Tendido",
@@ -634,7 +637,7 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
                 st.plotly_chart(fig_donut, use_container_width=True)
                 
         with st.expander("🔍 Ver Listado Detallado de este Frente"):
-            st.dataframe(df_inv[["piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "metros_tendido", "m3_excavacion", "tipo_de_equipo", "Avance_%"]], use_container_width=True)
+            st.dataframe(df_inv[["piquete", "tipo_estructura", "cabezal", "longitud_poste", "cantidad_aisladores", "metros_tendido", "m3_excavacion", "tipo_de_equipo", "Avance_%"]], use_container_width=True)
 
 # -------------------------------------------------------------------------
 # MÓDULO 4: CARGA Y GESTIÓN DE CAMPO
@@ -663,12 +666,13 @@ elif opcion == "📝 Carga y Gestión de Campo":
         p_info = pd.read_sql_query("SELECT * FROM piquetes WHERE piquete = ?", conn, params=[piquete_sel]).iloc[0]
         conn.close()
         
+        cabezal_val = p_info["cabezal"] if p_info["cabezal"] and p_info["cabezal"] != "None" else "S/D"
         l_poste = p_info["longitud_poste"] if p_info["longitud_poste"] and p_info["longitud_poste"] != "None" else "N/A"
         cant_aisl_actual = int(p_info["cantidad_aisladores"]) if pd.notna(p_info["cantidad_aisladores"]) else 0
         metros_tendido_actual = float(p_info["metros_tendido"]) if pd.notna(p_info["metros_tendido"]) else 0.0
         m3_excavacion_actual = float(p_info["m3_excavacion"]) if pd.notna(p_info["m3_excavacion"]) else 0.0
         
-        st.info(f"📏 **LONGITUD POSTE:** {l_poste} | 🏗️ **ESTRUCTURA:** {p_info['tipo_estructura']} | 🔌 **AISLADORES:** {cant_aisl_actual} ud | 📏 **TENDIDO:** {metros_tendido_actual} m | ⛏️ **EXCAVACIÓN:** {m3_excavacion_actual:.2f} m³")
+        st.info(f"🏗️ **ESTRUCTURA:** {p_info['tipo_estructura']} | 🧩 **CABEZAL:** {cabezal_val} | 📏 **LONGITUD POSTE:** {l_poste} | 🔌 **AISLADORES:** {cant_aisl_actual} ud | 📏 **TENDIDO:** {metros_tendido_actual} m | ⛏️ **EXCAVACIÓN:** {m3_excavacion_actual:.2f} m³")
         
         st.markdown("### 📂 Documentación Actualizada del Piquete")
         col_dl1, col_dl2 = st.columns(2)
@@ -704,12 +708,14 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
             st.markdown("##### ⚙️ Configuración, Mediciones y Volúmenes del Piquete")
             
-            c_aisl1, c_aisl2, c_aisl3 = st.columns(3)
+            c_aisl1, c_aisl2, c_aisl3, c_aisl4 = st.columns(4)
             with c_aisl1:
-                cant_aisladores_input = st.number_input("🔌 Cantidad de Aisladores:", min_value=0, max_value=20, value=cant_aisl_actual)
+                cabezal_input = st.text_input("🧩 Cabezal:", value=cabezal_val)
             with c_aisl2:
-                metros_tendido_input = st.number_input("📏 Metros de Tendido / Vano (m):", min_value=0.0, step=1.0, value=metros_tendido_actual, format="%.2f")
+                cant_aisladores_input = st.number_input("🔌 Cantidad de Aisladores:", min_value=0, max_value=20, value=cant_aisl_actual)
             with c_aisl3:
+                metros_tendido_input = st.number_input("📏 Metros de Tendido / Vano (m):", min_value=0.0, step=1.0, value=metros_tendido_actual, format="%.2f")
+            with c_aisl4:
                 m3_excavacion_input = st.number_input("⛏️ Volumen de Excavación (m³):", min_value=0.0, step=0.1, value=m3_excavacion_actual, format="%.2f")
 
             st.markdown("---")
@@ -769,9 +775,9 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
                 conn = conectar_db()
                 conn.execute("""
-                    UPDATE piquetes SET cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
+                    UPDATE piquetes SET cabezal=?, cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
                     WHERE piquete=?
-                """, (int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), 
+                """, (cabezal_input, int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), 
                       f_excav, f_vert, f_desfile, f_riendas, f_crucetas, f_aislador, f_tendido, f_flechado, f_engramp, 
                       str(f_montaje) if f_montaje else None, str(nombre_anexo) if nombre_anexo else None, 
                       str(nombre_redline) if nombre_redline else None, piquete_sel))
@@ -1109,7 +1115,21 @@ else:
             df_mostrar[hito] = df_mostrar[hito].apply(lambda x: "N/A" if str(x).upper() in ["N/A", "NO APLICA"] else (pd.to_datetime(x).strftime('%d/%m/%Y') if pd.notna(pd.to_datetime(x, errors='coerce')) else "-"))
             
         df_exportar = df_mostrar.rename(columns=renombrar_columnas_export)
-        columnas_export_orden = ["tramo", "piquete", "tipo_estructura", "longitud_poste", "cantidad_aisladores", "metros_tendido", "m3_excavacion", "Avance_%", "anexo_montaje", "red_line"] + list(renombrar_columnas_export.values())
+        
+        # ORDEN EXACTO SOLICITADO
+        columnas_export_orden = [
+            "tramo", 
+            "piquete", 
+            "tipo_estructura", 
+            "cabezal", 
+            "longitud_poste", 
+            "cantidad_aisladores", 
+            "metros_tendido", 
+            "m3_excavacion", 
+            "Avance_%", 
+            "anexo_montaje", 
+            "red_line"
+        ] + list(renombrar_columnas_export.values())
         
         st.markdown("---")
         st.markdown("### 📥 Exportar y Notificar Reportes de Trazabilidad")
