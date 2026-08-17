@@ -18,9 +18,14 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 DRIVE_FOLDER_ID = "1Gv2m6_uBDjQkM4QluwO_Zmhjdw4LM85X"
 DB_FILE_NAME = "obra_trazabilidad.db"
 
-# --- FUNCIONES GOOGLE DRIVE ---
+# --- FUNCIONES GOOGLE DRIVE CON MANEJO MEJORADO DE ERRORES ---
 def get_drive_service():
     creds_dict = dict(st.secrets["gcp_service_account"])
+    
+    # Formatear saltos de línea en la clave privada para Streamlit Cloud
+    if "private_key" in creds_dict:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
     creds = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=['https://www.googleapis.com/auth/drive']
     )
@@ -62,15 +67,18 @@ def upload_db_to_drive():
         
         if files:
             file_id = files[0]['id']
-            service.files().update(fileId=file_id, media_body=media).execute()
+            archivo = service.files().update(fileId=file_id, media_body=media).execute()
         else:
             file_metadata = {'name': DB_FILE_NAME}
             if DRIVE_FOLDER_ID:
                 file_metadata['parents'] = [DRIVE_FOLDER_ID]
-            service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        print("Base de datos subida a Drive correctamente.")
+            archivo = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        
+        st.success(f"✔️ Backup sincronizado en Google Drive con éxito (ID: {archivo.get('id')}).")
+        return True
     except Exception as e:
-        print(f"Error al subir a Drive: {e}")
+        st.error(f"❌ Error al sincronizar con Google Drive: {e}")
+        return False
 
 # Sincronizar descarga inicial al arrancar la app
 if "db_descargada" not in st.session_state:
