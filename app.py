@@ -18,7 +18,7 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 DRIVE_FOLDER_ID = "1Gv2m6_uBDjQkM4QluwO_Zmhjdw4LM85X"
 DB_FILE_NAME = "obra_trazabilidad.db"
 
-# --- FUNCIONES GOOGLE DRIVE CON MANEJO MEJORADO DE ERRORES ---
+# --- FUNCIONES GOOGLE DRIVE ---
 def get_drive_service():
     if "gcp_service_account" not in st.secrets:
         return None
@@ -85,7 +85,6 @@ def upload_db_to_drive():
         st.error(f"❌ Error al sincronizar con Google Drive: {e}")
         return False
 
-# Sincronizar descarga inicial al arrancar la app
 if "db_descargada" not in st.session_state:
     download_db_from_drive()
     st.session_state.db_descargada = True
@@ -93,11 +92,9 @@ if "db_descargada" not in st.session_state:
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzado", page_icon="⚡")
 
-# --- INICIALIZAR RUTA/ESTADO DE PROYECTO ---
 if "proyecto_activo" not in st.session_state:
     st.session_state.proyecto_activo = None
 
-# --- LISTA OFICIAL DE LAS 9 ETAPAS OPERATIVAS (HITOS) ---
 HITOS_OBRA = [
     "excavacion", 
     "verticalizado", 
@@ -185,7 +182,6 @@ def enviar_reporte_correo(destinatarios, asunto, cuerpo, archivo_bytes, nombre_a
         st.error(f"❌ Error al enviar el correo: {e}")
         return False
 
-# --- MENÚ LATERAL DIRECTO ---
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3227/3227840.png", width=70)
 st.sidebar.markdown("👤 **Modo:** Acceso Total Abierto")
 
@@ -198,7 +194,6 @@ opcion = st.sidebar.radio("Ir a la pestaña:", [
     "📥 Migración Inicial (Excel)"
 ])
 
-# Estilos personalizados CSS
 st.markdown("""
     <style>
     .block-container {
@@ -418,14 +413,14 @@ if opcion == "📥 Migración Inicial (Excel)":
                             conn.execute("""
                                 INSERT OR REPLACE INTO piquetes (
                                     tramo, piquete, tipo_estructura, cabezal, longitud_poste, cantidad_aisladores, metros_tendido, m3_excavacion, excavacion, verticalizado, 
-                                    desfile_de_poste, montaje_riendas, armado_de_crucetas, montaje_aislador, tendido, flechado, engrampado, fecha_montaje, observacion_ofm
+                                    desfile_de_poste, montaje_riendas, armado_de_crucetas, montaje_aislador, tendido, flechado, engrampado, fecha_montaje, tipo_de_equipo, observacion_ofm
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 nombre_proyecto_manual, piquete_val, get_val(row, "TIPO ESTRUCTURA") or "S/D",
                                 get_val(row, "CABEZAL") or "S/D", get_val(row, "LONGITUD POSTE"), cant_aisl, m_tend, m3_exc,
                                 f_excav, f_vert, f_desf, f_riend, f_cruc, f_aisl, f_tend, f_flec, f_engr, f_liber,
-                                get_val(row, "OBSERVACION", "OBSERVACION OFM")
+                                get_val(row, "TIPO DE EQUIPO", "EQUIPO"), get_val(row, "OBSERVACION", "OBSERVACION OFM")
                             ))
                             registros_cargados += 1
                                 
@@ -654,11 +649,26 @@ elif opcion == "📝 Carga y Gestión de Campo":
         p_info = pd.read_sql_query("SELECT * FROM piquetes WHERE piquete = ?", conn, params=[piquete_sel]).iloc[0]
         conn.close()
         
-        cabezal_val = p_info["cabezal"] if p_info["cabezal"] and p_info["cabezal"] != "None" else "S/D"
-        l_poste = p_info["longitud_poste"] if p_info["longitud_poste"] and p_info["longitud_poste"] != "None" else "N/A"
-        cant_aisl_actual = int(p_info["cantidad_aisladores"]) if pd.notna(p_info["cantidad_aisladores"]) else 0
-        metros_tendido_actual = float(p_info["metros_tendido"]) if pd.notna(p_info["metros_tendido"]) else 0.0
-        m3_excavacion_actual = float(p_info["m3_excavacion"]) if pd.notna(p_info["m3_excavacion"]) else 0.0
+        cabezal_val = p_info["cabezal"] if p_info["cabezal"] and str(p_info["cabezal"]) != "None" else "S/D"
+        l_poste = p_info["longitud_poste"] if p_info["longitud_poste"] and str(p_info["longitud_poste"]) != "None" else "N/A"
+        
+        try:
+            cant_aisl_actual = int(p_info["cantidad_aisladores"]) if pd.notna(p_info["cantidad_aisladores"]) else 0
+        except (ValueError, TypeError):
+            cant_aisl_actual = 0
+            
+        try:
+            metros_tendido_actual = max(0.0, float(p_info["metros_tendido"])) if pd.notna(p_info["metros_tendido"]) else 0.0
+        except (ValueError, TypeError):
+            metros_tendido_actual = 0.0
+
+        try:
+            m3_excavacion_actual = max(0.0, float(p_info["m3_excavacion"])) if pd.notna(p_info["m3_excavacion"]) else 0.0
+        except (ValueError, TypeError):
+            m3_excavacion_actual = 0.0
+
+        tipo_equipo_val = p_info.get("tipo_de_equipo", "") or ""
+        obs_ofm_val = p_info.get("observacion_ofm", "") or ""
         
         st.info(f"🏗️ **ESTRUCTURA:** {p_info['tipo_estructura']} | 🧩 **CABEZAL:** {cabezal_val} | 📏 **LONGITUD POSTE:** {l_poste} | 🔌 **AISLADORES:** {cant_aisl_actual} ud | 📏 **TENDIDO:** {metros_tendido_actual} m | ⛏️ **EXCAVACIÓN:** {m3_excavacion_actual:.2f} m³")
         
@@ -666,7 +676,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
         col_dl1, col_dl2 = st.columns(2)
         
         with col_dl1:
-            doc_anexo_actual = p_info["anexo_montaje"] if p_info["anexo_montaje"] and p_info["anexo_montaje"] != "None" else None
+            doc_anexo_actual = p_info["anexo_montaje"] if p_info["anexo_montaje"] and str(p_info["anexo_montaje"]) != "None" else None
             if doc_anexo_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_anexo_actual)):
                 st.write(f"📄 **Anexo Técnico Activo:** `{doc_anexo_actual}`")
                 with open(os.path.join(CARPA_ARCHIVOS, doc_anexo_actual), "rb") as file:
@@ -675,7 +685,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 st.warning("⚠️ No hay ningún Anexo Técnico cargado.")
                 
         with col_dl2:
-            doc_red_actual = p_info["idi"] if p_info["idi"] and p_info["idi"] != "None" else None
+            doc_red_actual = p_info["idi"] if p_info["idi"] and str(p_info["idi"]) != "None" else None
             if doc_red_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_red_actual)):
                 st.write(f"🗺️ ** IDI Activo:** `{doc_red_actual}`")
                 with open(os.path.join(CARPA_ARCHIVOS, doc_red_actual), "rb") as file:
@@ -705,6 +715,12 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 metros_tendido_input = st.number_input("📏 Metros de Tendido / Vano (m):", min_value=0.0, step=1.0, value=metros_tendido_actual, format="%.2f")
             with c_aisl4:
                 m3_excavacion_input = st.number_input("⛏️ Volumen de Excavación (m³):", min_value=0.0, step=0.1, value=m3_excavacion_actual, format="%.2f")
+
+            c_eq1, c_eq2 = st.columns(2)
+            with c_eq1:
+                tipo_equipo_input = st.text_input("🚜 Tipo de Equipo / Cuadrilla:", value=str(tipo_equipo_val))
+            with c_eq2:
+                obs_ofm_input = st.text_input("📝 Observaciones / Notas de Campo:", value=str(obs_ofm_val))
 
             st.markdown("---")
             st.markdown("##### 🛠️ Carga de Fechas para los 9 Hitos de Campo (Marque 'N/A' si el hito no aplica)")
@@ -763,12 +779,18 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
                 conn = conectar_db()
                 conn.execute("""
-                    UPDATE piquetes SET cabezal=?, cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, idi=?
+                    UPDATE piquetes SET 
+                        cabezal=?, cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, 
+                        excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, 
+                        armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, 
+                        engrampado=?, fecha_montaje=?, tipo_de_equipo=?, observacion_ofm=?, 
+                        anexo_montaje=?, idi=?
                     WHERE piquete=?
                 """, (cabezal_input, int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), 
                       f_excav, f_vert, f_desfile, f_riendas, f_crucetas, f_aislador, f_tendido, f_flechado, f_engramp, 
-                      str(f_montaje) if f_montaje else None, str(nombre_anexo) if nombre_anexo else None, 
-                      str(nombre_redline) if nombre_redline else None, piquete_sel))
+                      str(f_montaje) if f_montaje else None, tipo_equipo_input, obs_ofm_input,
+                      str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, 
+                      piquete_sel))
                 conn.commit()
                 conn.close()
                 
