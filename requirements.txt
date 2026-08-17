@@ -5,3 +5,4 @@ xlsxwriter
 openpyxl
 google-api-python-client
 google-auth
+pypdf
