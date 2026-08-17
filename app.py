@@ -22,7 +22,6 @@ DB_FILE_NAME = "obra_trazabilidad.db"
 def get_drive_service():
     creds_dict = dict(st.secrets["gcp_service_account"])
     
-    # Formatear saltos de línea en la clave privada para Streamlit Cloud
     if "private_key" in creds_dict:
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
@@ -117,21 +116,15 @@ NOMBRES_HITOS = {
     "engrampado": "9. Engrampado"
 }
 
-# --- FUNCIÓN CENTRALIZADA PARA CÁLCULO DE AVANCE DINÁMICO (EXCLUYE N/A) ---
 def calcular_avance_piquete(row_piquete):
     hitos_validos = 0
     hitos_completados = 0
     
     for hito in HITOS_OBRA:
         val = str(row_piquete.get(hito, "")).strip().upper()
-        
-        # Ignorar si está marcado como N/A o No Aplica
         if val in ["N/A", "NO APLICA", "NA", "N/D"]:
             continue
-            
         hitos_validos += 1
-        
-        # Considerar completado si posee fecha o valor válido
         if val and val not in ["NONE", "NAN", "", "NAT", "-"]:
             hitos_completados += 1
             
@@ -140,7 +133,6 @@ def calcular_avance_piquete(row_piquete):
         
     return round((hitos_completados / hitos_validos) * 100, 2)
 
-# --- FUNCIÓN AUXILIAR PARA NORMALIZAR FECHAS AL CARGAR EXCEL ---
 def normalizar_fecha(val):
     if pd.isna(val) or val is None:
         return None
@@ -157,7 +149,6 @@ def normalizar_fecha(val):
         pass
     return val_str
 
-# --- FUNCIÓN DE ENVÍO DE CORREO ELECTRÓNICO ---
 def enviar_reporte_correo(destinatarios, asunto, cuerpo, archivo_bytes, nombre_archivo):
     try:
         EMAIL_EMISOR = st.secrets["SMTP_EMAIL"]
@@ -201,7 +192,7 @@ opcion = st.sidebar.radio("Ir a la pestaña:", [
     "📥 Migración Inicial (Excel)"
 ])
 
-# Estilos personalizados CSS Dashboard Moderno Dark
+# Estilos personalizados CSS
 st.markdown("""
     <style>
     .block-container {
@@ -260,10 +251,8 @@ st.markdown("""
 st.title("⚡ Panel de Control de Obra Eléctrica Avanzado")
 st.markdown("---")
 
-DB_NAME = "obra_trazabilidad.db"
-
 def conectar_db():
-    return sqlite3.connect(DB_NAME)
+    return sqlite3.connect(DB_FILE_NAME)
 
 def inicializar_db():
     conn = conectar_db()
@@ -274,7 +263,7 @@ def inicializar_db():
     if len(columnas) > 0 and ("cabezal" not in columnas or "armado_de_crucetas" not in columnas):
         conn.close()
         try: 
-            os.remove(DB_NAME)
+            os.remove(DB_FILE_NAME)
         except: 
             pass
         conn = conectar_db()
@@ -387,16 +376,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                     for _, row in df.iterrows():
                         piquete_val = get_val(row, "PIQUETE")
                         if piquete_val:
-                            cant_aisl_raw = get_val(
-                                row, 
-                                "CANTIDAD AISLADORES", 
-                                "CANT AISLADORES", 
-                                "CANT. AISLADORES", 
-                                "AISLADORES", 
-                                "CANT AISLADOR", 
-                                "CANTIDAD DE AISLADORES",
-                                "AISLADOR"
-                            )
+                            cant_aisl_raw = get_val(row, "CANTIDAD AISLADORES", "CANT AISLADORES", "CANT. AISLADORES", "AISLADORES", "CANT AISLADOR", "CANTIDAD DE AISLADORES", "AISLADOR")
                             if cant_aisl_raw is not None and str(cant_aisl_raw).strip() != "":
                                 try:
                                     val_clean = str(cant_aisl_raw).replace(',', '.').strip()
@@ -436,24 +416,9 @@ if opcion == "📥 Migración Inicial (Excel)":
                                 )
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
-                                nombre_proyecto_manual,
-                                piquete_val,
-                                get_val(row, "TIPO ESTRUCTURA") or "S/D",
-                                get_val(row, "CABEZAL") or "S/D",
-                                get_val(row, "LONGITUD POSTE"),
-                                cant_aisl,
-                                m_tend,
-                                m3_exc,
-                                f_excav,
-                                f_vert,
-                                f_desf,
-                                f_riend,
-                                f_cruc,
-                                f_aisl,
-                                f_tend,
-                                f_flec,
-                                f_engr,
-                                f_liber,
+                                nombre_proyecto_manual, piquete_val, get_val(row, "TIPO ESTRUCTURA") or "S/D",
+                                get_val(row, "CABEZAL") or "S/D", get_val(row, "LONGITUD POSTE"), cant_aisl, m_tend, m3_exc,
+                                f_excav, f_vert, f_desf, f_riend, f_cruc, f_aisl, f_tend, f_flec, f_engr, f_liber,
                                 get_val(row, "OBSERVACION", "OBSERVACION OFM")
                             ))
                             registros_cargados += 1
@@ -462,7 +427,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                     conn.close()
                     
                     if registros_cargados > 0:
-                        upload_db_to_drive()  # Respaldo automático en Drive
+                        upload_db_to_drive()
                         st.session_state.proyecto_activo = nombre_proyecto_manual
                         st.success(f"✔️ ¡Migración exitosa! Se procesaron {registros_cargados} piquetes correctamente.")
                         st.rerun()
@@ -496,7 +461,6 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
 
         if proyecto_sel:
             df_proyecto = pd.read_sql_query("SELECT * FROM piquetes WHERE tramo = ?", conn, params=(proyecto_sel,))
-            
             df_proyecto["Avance_%"] = df_proyecto.apply(calcular_avance_piquete, axis=1)
 
             total_piquetes = len(df_proyecto)
@@ -799,7 +763,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 conn.commit()
                 conn.close()
                 
-                upload_db_to_drive()  # Respaldo automático en Drive
+                upload_db_to_drive()
                 st.session_state.proyecto_activo = tramo_sel
                 st.success(f"✔️ Historial de {piquete_sel} actualizado correctamente.")
                 st.rerun()
@@ -874,7 +838,7 @@ else:
                     conn.execute("INSERT OR REPLACE INTO metas_ritmo (tramo, ritmo_objetivo, fecha_meta) VALUES (?, ?, ?)", (tramo_sel, ritmo_objetivo_input, str(f_entrega)))
                     conn.commit()
                     conn.close()
-                    upload_db_to_drive()  # Respaldo automático en Drive
+                    upload_db_to_drive()
                     st.session_state.proyecto_activo = tramo_sel
                     st.success("✔️ Parámetros contractuales y metas de ritmo guardados con éxito.")
                     st.rerun()
