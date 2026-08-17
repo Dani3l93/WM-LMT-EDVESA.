@@ -20,6 +20,8 @@ DB_FILE_NAME = "obra_trazabilidad.db"
 
 # --- FUNCIONES GOOGLE DRIVE CON MANEJO MEJORADO DE ERRORES ---
 def get_drive_service():
+    if "gcp_service_account" not in st.secrets:
+        return None
     creds_dict = dict(st.secrets["gcp_service_account"])
     
     if "private_key" in creds_dict:
@@ -33,6 +35,8 @@ def get_drive_service():
 def download_db_from_drive():
     try:
         service = get_drive_service()
+        if not service:
+            return
         query = f"name = '{DB_FILE_NAME}' and trashed = false"
         if DRIVE_FOLDER_ID:
             query += f" and '{DRIVE_FOLDER_ID}' in parents"
@@ -55,6 +59,8 @@ def download_db_from_drive():
 def upload_db_to_drive():
     try:
         service = get_drive_service()
+        if not service:
+            return False
         query = f"name = '{DB_FILE_NAME}' and trashed = false"
         if DRIVE_FOLDER_ID:
             query += f" and '{DRIVE_FOLDER_ID}' in parents"
@@ -388,14 +394,14 @@ if opcion == "📥 Migración Inicial (Excel)":
 
                             m_tend = get_val(row, "METROS TENDIDO", "METROS", "VANO", "DISTANCIA")
                             try:
-                                m_tend = float(m_tend) if m_tend is not None else 0.0
-                            except ValueError:
+                                m_tend = float(str(m_tend).replace(',', '.').strip()) if m_tend is not None else 0.0
+                            except (ValueError, TypeError):
                                 m_tend = 0.0
 
-                            m3_exc = get_val(row, "M3 EXCAVACION", "M3 EXCAVACION", "VOLUMEN EXCAVACION")
+                            m3_exc = get_val(row, "M3 EXCAVACION", "VOLUMEN EXCAVACION", "EXCAVACION M3")
                             try:
-                                m3_exc = float(m3_exc) if m3_exc is not None else 0.0
-                            except ValueError:
+                                m3_exc = float(str(m3_exc).replace(',', '.').strip()) if m3_exc is not None else 0.0
+                            except (ValueError, TypeError):
                                 m3_exc = 0.0
 
                             f_excav = normalizar_fecha(get_val(row, "1. EXCAV PIQUETES", "EXCAV PIQUETES", "EXCAVACION"))
@@ -458,6 +464,7 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
             idx_defecto = lista_proyectos.index(st.session_state.proyecto_activo)
 
         proyecto_sel = st.selectbox("Seleccione el Proyecto / Frente a consultar:", lista_proyectos, index=idx_defecto)
+        st.session_state.proyecto_activo = proyecto_sel
 
         if proyecto_sel:
             df_proyecto = pd.read_sql_query("SELECT * FROM piquetes WHERE tramo = ?", conn, params=(proyecto_sel,))
@@ -549,6 +556,7 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
             idx_defecto = tramos_validos.index(st.session_state.proyecto_activo)
             
         tramo_sel = st.selectbox("Filtrar Análisis por Frente/Tramo:", tramos_validos, index=idx_defecto)
+        st.session_state.proyecto_activo = tramo_sel
         df_inv = df_obra[df_obra["tramo"] == tramo_sel].copy()
         
         total_piquetes_frente = len(df_inv)
@@ -638,6 +646,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
             idx_defecto = tramos_fijos.index(st.session_state.proyecto_activo)
             
         tramo_sel = st.selectbox("Seleccione Frente de Trabajo:", tramos_fijos, index=idx_defecto)
+        st.session_state.proyecto_activo = tramo_sel
         piquetes_filtrados = df_combos[df_combos["tramo"] == tramo_sel]["piquete"].unique()
         piquete_sel = st.selectbox("Estructura / Piquete Específico:", piquetes_filtrados)
         
@@ -790,6 +799,7 @@ else:
             idx_defecto = tramos_validos.index(st.session_state.proyecto_activo)
             
         tramo_sel = st.selectbox("Frente Operativo / Proyecto Seleccionado:", tramos_validos, index=idx_defecto)
+        st.session_state.proyecto_activo = tramo_sel
         df_tramo = df_obra[df_obra["tramo"] == tramo_sel]
 
         c_actual = df_cronogramas[df_cronogramas["tramo"] == tramo_sel]
