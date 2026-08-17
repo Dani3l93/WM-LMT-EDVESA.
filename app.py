@@ -14,6 +14,7 @@ import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+from pypdf import PdfReader  # Librería nativa en Python para extraer imágenes/texto de PDFs
 
 DRIVE_FOLDER_ID = "1Gv2m6_uBDjQkM4QluwO_Zmhjdw4LM85X"
 DB_FILE_NAME = "obra_trazabilidad.db"
@@ -156,6 +157,41 @@ def normalizar_fecha(val):
     except Exception:
         pass
     return val_str
+
+# --- FUNCIÓN DE VISUALIZACIÓN / EXTRACCIÓN DE PDF CON PYPDF Y ZOOM ---
+def renderizar_visor_pdf(ruta_pdf, key_suffix=""):
+    try:
+        reader = PdfReader(ruta_pdf)
+        num_paginas = len(reader.pages)
+        st.caption(f"📄 Documento PDF ({num_paginas} página(s))")
+
+        anchos = {"Normal (100%)": 700, "Grande (125%)": 900, "Pantalla Completa (150%)": 1100}
+        zoom_sel = st.select_slider(
+            "🔎 Zoom del Visor:", 
+            options=list(anchos.keys()), 
+            value="Grande (125%)", 
+            key=f"zoom_{key_suffix}"
+        )
+        ancho_px = anchos[zoom_sel]
+
+        # Renderizado de imágenes incrustadas en el PDF (Planialtimetrías / Planos)
+        imagenes_extraidas = 0
+        for idx_pag, page in enumerate(reader.pages):
+            for img_file in page.images:
+                st.image(img_file.data, caption=f"Imagen/Plano {imagenes_extraidas + 1} (Pág. {idx_pag + 1})", width=ancho_px)
+                imagenes_extraidas += 1
+
+        # Si no se encontraron imágenes directas, mostrar texto o visor nativo embebido
+        if imagenes_extraidas == 0:
+            with open(ruta_pdf, "rb") as f:
+                bytes_pdf = f.read()
+            import base64
+            b64_pdf = base64.b64encode(bytes_pdf).decode('utf-8')
+            pdf_display = f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="{ancho_px}" height="600" type="application/pdf"></iframe>'
+            st.markdown(pdf_display, unsafe_allow_html=True)
+            
+    except Exception as e:
+        st.warning(f"No se pudo desplegar la previsualización interactiva del PDF: {e}")
 
 # --- FUNCIÓN DE ENVÍO DE CORREO ELECTRÓNICO ---
 def enviar_reporte_correo(destinatarios, asunto, cuerpo, archivo_bytes, nombre_archivo):
@@ -695,18 +731,30 @@ elif opcion == "📝 Carga y Gestión de Campo":
         with col_dl1:
             doc_anexo_actual = p_info["anexo_montaje"] if p_info["anexo_montaje"] and p_info["anexo_montaje"] != "None" else None
             if doc_anexo_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_anexo_actual)):
+                ruta_anexo = os.path.join(CARPA_ARCHIVOS, doc_anexo_actual)
                 st.write(f"📄 **Anexo Técnico Activo:** `{doc_anexo_actual}`")
-                with open(os.path.join(CARPA_ARCHIVOS, doc_anexo_actual), "rb") as file:
+                with open(ruta_anexo, "rb") as file:
                     st.download_button(label="📥 Descargar Anexo Montaje", data=file, file_name=doc_anexo_actual, mime="application/octet-stream", key="dl_anexo")
+                
+                # Previsualizador interactivo de PDF si corresponde
+                if doc_anexo_actual.lower().endswith(".pdf"):
+                    with st.expander("👁️ Previsualizar Anexo Técnico (PDF / Plano)"):
+                        renderizar_visor_pdf(ruta_anexo, key_suffix="anexo")
             else:
                 st.warning("⚠️ No hay ningún Anexo Técnico cargado.")
                 
         with col_dl2:
             doc_red_actual = p_info["idi"] if p_info["idi"] and p_info["idi"] != "None" else None
             if doc_red_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_red_actual)):
+                ruta_idi = os.path.join(CARPA_ARCHIVOS, doc_red_actual)
                 st.write(f"🗺️ ** IDI Activo:** `{doc_red_actual}`")
-                with open(os.path.join(CARPA_ARCHIVOS, doc_red_actual), "rb") as file:
+                with open(ruta_idi, "rb") as file:
                     st.download_button(label="📥 Descargar IDI", data=file, file_name=doc_red_actual, mime="application/octet-stream", key="dl_redline")
+                
+                # Previsualizador interactivo de PDF si corresponde
+                if doc_red_actual.lower().endswith(".pdf"):
+                    with st.expander("👁️ Previsualizar IDI (PDF / Plano)"):
+                        renderizar_visor_pdf(ruta_idi, key_suffix="idi")
             else:
                 st.warning("⚠️ No hay ningún IDI cargado.")
                 
