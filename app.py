@@ -689,7 +689,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
         with col_dl2:
             doc_red_actual = p_info["idi"] if p_info["idi"] and p_info["idi"] != "None" else None
             if doc_red_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_red_actual)):
-                st.write(f"🗺️ **Plano Red Line Activo:** `{doc_red_actual}`")
+                st.write(f"🗺️ **Plano IDI Activo:** `{doc_red_actual}`")
                 with open(os.path.join(CARPA_ARCHIVOS, doc_red_actual), "rb") as file:
                     st.download_button(label="📥 Descargar Red Line", data=file, file_name=doc_red_actual, mime="application/octet-stream", key="dl_redline")
             else:
