@@ -289,7 +289,7 @@ def inicializar_db():
             fecha_montaje TEXT,
             tipo_de_equipo TEXT,
             anexo_montaje TEXT,
-            red_line TEXT,
+            idi TEXT,
             observacion_ofm TEXT
         )
     """)
@@ -687,13 +687,13 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 st.warning("⚠️ No hay ningún Anexo Técnico cargado.")
                 
         with col_dl2:
-            doc_red_actual = p_info["red_line"] if p_info["red_line"] and p_info["red_line"] != "None" else None
+            doc_red_actual = p_info["idi"] if p_info["idi"] and p_info["idi"] != "None" else None
             if doc_red_actual and os.path.exists(os.path.join(CARPA_ARCHIVOS, doc_red_actual)):
                 st.write(f"🗺️ **Plano Red Line Activo:** `{doc_red_actual}`")
                 with open(os.path.join(CARPA_ARCHIVOS, doc_red_actual), "rb") as file:
                     st.download_button(label="📥 Descargar Red Line", data=file, file_name=doc_red_actual, mime="application/octet-stream", key="dl_redline")
             else:
-                st.warning("⚠️ No hay ningún plano Red Line cargado.")
+                st.warning("⚠️ No hay ningún IDI cargado.")
                 
         st.markdown("---")
         
@@ -761,7 +761,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
             if st.form_submit_button("💾 Actualizar Historial de Trazabilidad y Archivos"):
                 nombre_anexo = p_info["anexo_montaje"]
-                nombre_redline = p_info["red_line"]
+                nombre_redline = p_info["idi"]
                 
                 if archivo_anexo is not None:
                     nombre_anexo = f"Anexo_{piquete_sel}_{archivo_anexo.name}"
@@ -775,7 +775,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
                 conn = conectar_db()
                 conn.execute("""
-                    UPDATE piquetes SET cabezal=?, cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, red_line=?
+                    UPDATE piquetes SET cabezal=?, cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, engrampado=?, fecha_montaje=?, anexo_montaje=?, idi=?
                     WHERE piquete=?
                 """, (cabezal_input, int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), 
                       f_excav, f_vert, f_desfile, f_riendas, f_crucetas, f_aislador, f_tendido, f_flechado, f_engramp, 
@@ -1128,7 +1128,7 @@ else:
             "m3_excavacion", 
             "Avance_%", 
             "anexo_montaje", 
-            "red_line"
+            "idi"
         ] + list(renombrar_columnas_export.values())
         
         st.markdown("---")
