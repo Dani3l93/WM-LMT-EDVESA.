@@ -18,6 +18,7 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 DRIVE_FOLDER_ID = "1Gv2m6_uBDjQkM4QluwO_Zmhjdw4LM85X"
 DB_FILE_NAME = "obra_trazabilidad.db"
 
+# --- FUNCIONES GOOGLE DRIVE ---
 def get_drive_service():
     creds_dict = dict(st.secrets["gcp_service_account"])
     creds = service_account.Credentials.from_service_account_info(
@@ -71,7 +72,12 @@ def upload_db_to_drive():
     except Exception as e:
         print(f"Error al subir a Drive: {e}")
 
-# Configuración de página
+# Sincronizar descarga inicial al arrancar la app
+if "db_descargada" not in st.session_state:
+    download_db_from_drive()
+    st.session_state.db_descargada = True
+
+# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzado", page_icon="⚡")
 
 # --- INICIALIZAR RUTA/ESTADO DE PROYECTO ---
@@ -448,6 +454,7 @@ if opcion == "📥 Migración Inicial (Excel)":
                     conn.close()
                     
                     if registros_cargados > 0:
+                        upload_db_to_drive()  # Respaldo automático en Drive
                         st.session_state.proyecto_activo = nombre_proyecto_manual
                         st.success(f"✔️ ¡Migración exitosa! Se procesaron {registros_cargados} piquetes correctamente.")
                         st.rerun()
@@ -784,6 +791,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 conn.commit()
                 conn.close()
                 
+                upload_db_to_drive()  # Respaldo automático en Drive
                 st.session_state.proyecto_activo = tramo_sel
                 st.success(f"✔️ Historial de {piquete_sel} actualizado correctamente.")
                 st.rerun()
@@ -858,6 +866,7 @@ else:
                     conn.execute("INSERT OR REPLACE INTO metas_ritmo (tramo, ritmo_objetivo, fecha_meta) VALUES (?, ?, ?)", (tramo_sel, ritmo_objetivo_input, str(f_entrega)))
                     conn.commit()
                     conn.close()
+                    upload_db_to_drive()  # Respaldo automático en Drive
                     st.session_state.proyecto_activo = tramo_sel
                     st.success("✔️ Parámetros contractuales y metas de ritmo guardados con éxito.")
                     st.rerun()
@@ -1116,7 +1125,6 @@ else:
             
         df_exportar = df_mostrar.rename(columns=renombrar_columnas_export)
         
-        # ORDEN EXACTO SOLICITADO
         columnas_export_orden = [
             "tramo", 
             "piquete", 
