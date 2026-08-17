@@ -646,7 +646,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
         piquete_sel = st.selectbox("Estructura / Piquete Específico:", piquetes_filtrados)
         
         conn = conectar_db()
-        p_info = pd.read_sql_query("SELECT * FROM piquetes WHERE piquete = ?", conn, params=[piquete_sel]).iloc[0]
+        p_info = pd.read_sql_query("SELECT * FROM piquetes WHERE piquete = ? AND tramo = ?", conn, params=[piquete_sel, tramo_sel]).iloc[0]
         conn.close()
         
         cabezal_val = p_info["cabezal"] if p_info["cabezal"] and str(p_info["cabezal"]) != "None" else "S/D"
@@ -669,7 +669,9 @@ elif opcion == "📝 Carga y Gestión de Campo":
 
         tipo_equipo_val = p_info.get("tipo_de_equipo", "") or ""
         obs_ofm_val = p_info.get("observacion_ofm", "") or ""
-        
+        if str(obs_ofm_val).lower() in ["none", "nan"]:
+            obs_ofm_val = ""
+
         st.info(f"🏗️ **ESTRUCTURA:** {p_info['tipo_estructura']} | 🧩 **CABEZAL:** {cabezal_val} | 📏 **LONGITUD POSTE:** {l_poste} | 🔌 **AISLADORES:** {cant_aisl_actual} ud | 📏 **TENDIDO:** {metros_tendido_actual} m | ⛏️ **EXCAVACIÓN:** {m3_excavacion_actual:.2f} m³")
         
         st.markdown("### 📂 Documentación Actualizada del Piquete")
@@ -708,7 +710,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
             
             c_aisl1, c_aisl2, c_aisl3, c_aisl4 = st.columns(4)
             with c_aisl1:
-                cabezal_input = st.text_input("🧩 Cabezal:", value=cabezal_val)
+                cabezal_input = st.text_input("🧩 Cabezal:", value=str(cabezal_val))
             with c_aisl2:
                 cant_aisladores_input = st.number_input("🔌 Cantidad de Aisladores:", min_value=0, max_value=20, value=cant_aisl_actual)
             with c_aisl3:
@@ -720,7 +722,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
             with c_eq1:
                 tipo_equipo_input = st.text_input("🚜 Tipo de Equipo / Cuadrilla:", value=str(tipo_equipo_val))
             with c_eq2:
-                obs_ofm_input = st.text_input("📝 Observaciones / Notas de Campo:", value=str(obs_ofm_val))
+                obs_ofm_input = st.text_area("📝 Observaciones / Notas de Campo:", value=str(obs_ofm_val), height=100)
 
             st.markdown("---")
             st.markdown("##### 🛠️ Carga de Fechas para los 9 Hitos de Campo (Marque 'N/A' si el hito no aplica)")
@@ -731,13 +733,13 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 c_f, c_na = st.columns([3, 1])
                 with c_na:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                    marcado_na = st.checkbox("N/A", value=es_na_previo, key=f"chk_na_{clave_db}")
+                    marcado_na = st.checkbox("N/A", value=es_na_previo, key=f"chk_na_{clave_db}_{piquete_sel}")
                 with c_f:
                     if marcado_na:
-                        st.text_input(label, value="N/A", disabled=True, key=f"inp_na_{clave_db}")
+                        st.text_input(label, value="N/A", disabled=True, key=f"inp_na_{clave_db}_{piquete_sel}")
                         return "N/A"
                     else:
-                        fecha_val = st.date_input(label, value=convertir_a_fecha(val_db), key=f"inp_f_{clave_db}")
+                        fecha_val = st.date_input(label, value=convertir_a_fecha(val_db), key=f"inp_f_{clave_db}_{piquete_sel}")
                         return str(fecha_val) if fecha_val else None
 
             col1, col2 = st.columns(2)
@@ -763,41 +765,43 @@ elif opcion == "📝 Carga y Gestión de Campo":
             with col_arch2:
                 archivo_redline = st.file_uploader("Subir Nuevo IDI", type=["docx", "xlsx", "pdf", "xls"])
 
-            if st.form_submit_button("💾 Actualizar Historial de Trazabilidad y Archivos"):
-                nombre_anexo = p_info["anexo_montaje"]
-                nombre_redline = p_info["idi"]
-                
-                if archivo_anexo is not None:
-                    nombre_anexo = f"Anexo_{piquete_sel}_{archivo_anexo.name}"
-                    with open(os.path.join(CARPA_ARCHIVOS, nombre_anexo), "wb") as f:
-                        f.write(archivo_anexo.getbuffer())
-                        
-                if archivo_redline is not None:
-                    nombre_redline = f"RedLine_{piquete_sel}_{archivo_redline.name}"
-                    with open(os.path.join(CARPA_ARCHIVOS, nombre_redline), "wb") as f:
-                        f.write(archivo_redline.getbuffer())
+            guardar_cambios = st.form_submit_button("💾 Actualizar Historial de Trazabilidad y Archivos")
 
-                conn = conectar_db()
-                conn.execute("""
-                    UPDATE piquetes SET 
-                        cabezal=?, cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, 
-                        excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, 
-                        armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, 
-                        engrampado=?, fecha_montaje=?, tipo_de_equipo=?, observacion_ofm=?, 
-                        anexo_montaje=?, idi=?
-                    WHERE piquete=?
-                """, (cabezal_input, int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), 
-                      f_excav, f_vert, f_desfile, f_riendas, f_crucetas, f_aislador, f_tendido, f_flechado, f_engramp, 
-                      str(f_montaje) if f_montaje else None, tipo_equipo_input, obs_ofm_input,
-                      str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, 
-                      piquete_sel))
-                conn.commit()
-                conn.close()
-                
-                upload_db_to_drive()
-                st.session_state.proyecto_activo = tramo_sel
-                st.success(f"✔️ Historial de {piquete_sel} actualizado correctamente.")
-                st.rerun()
+        if guardar_cambios:
+            nombre_anexo = p_info["anexo_montaje"]
+            nombre_redline = p_info["idi"]
+            
+            if archivo_anexo is not None:
+                nombre_anexo = f"Anexo_{piquete_sel}_{archivo_anexo.name}"
+                with open(os.path.join(CARPA_ARCHIVOS, nombre_anexo), "wb") as f:
+                    f.write(archivo_anexo.getbuffer())
+                    
+            if archivo_redline is not None:
+                nombre_redline = f"RedLine_{piquete_sel}_{archivo_redline.name}"
+                with open(os.path.join(CARPA_ARCHIVOS, nombre_redline), "wb") as f:
+                    f.write(archivo_redline.getbuffer())
+
+            conn = conectar_db()
+            conn.execute("""
+                UPDATE piquetes SET 
+                    cabezal=?, cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, 
+                    excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, 
+                    armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, 
+                    engrampado=?, fecha_montaje=?, tipo_de_equipo=?, observacion_ofm=?, 
+                    anexo_montaje=?, idi=?
+                WHERE piquete=? AND tramo=?
+            """, (cabezal_input, int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), 
+                  f_excav, f_vert, f_desfile, f_riendas, f_crucetas, f_aislador, f_tendido, f_flechado, f_engramp, 
+                  str(f_montaje) if f_montaje else None, tipo_equipo_input, obs_ofm_input,
+                  str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, 
+                  piquete_sel, tramo_sel))
+            conn.commit()
+            conn.close()
+            
+            upload_db_to_drive()
+            st.session_state.proyecto_activo = tramo_sel
+            st.success(f"✔️ Historial y observaciones del Piquete {piquete_sel} guardados correctamente.")
+            st.rerun()
 
 # -------------------------------------------------------------------------
 # MÓDULO 1: ANALÍTICA AVANZADA Y KPIS
