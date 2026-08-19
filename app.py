@@ -359,7 +359,6 @@ if opcion == "📥 Migración Inicial (Excel)":
                     df = df.dropna(subset=["PIQUETE"])
                     
                     conn = conectar_db()
-                    conn.execute("DELETE FROM piquetes WHERE tramo = ?", (nombre_proyecto_manual,))
                     
                     def get_val(row, *col_names):
                         for c in col_names:
@@ -411,11 +410,34 @@ if opcion == "📥 Migración Inicial (Excel)":
                             f_liber = normalizar_fecha(get_val(row, "10. FECHA MONTAJE / LIBERACIÓN FINAL", "FECHA DE LIBERACION", "FECHA MONTAJE"))
 
                             conn.execute("""
-                                INSERT OR REPLACE INTO piquetes (
-                                    tramo, piquete, tipo_estructura, cabezal, longitud_poste, cantidad_aisladores, metros_tendido, m3_excavacion, excavacion, verticalizado, 
-                                    desfile_de_poste, montaje_riendas, armado_de_crucetas, montaje_aislador, tendido, flechado, engrampado, fecha_montaje, tipo_de_equipo, observacion_ofm
+                                INSERT INTO piquetes (
+                                    tramo, piquete, tipo_estructura, cabezal, longitud_poste, 
+                                    cantidad_aisladores, metros_tendido, m3_excavacion, excavacion, 
+                                    verticalizado, desfile_de_poste, montaje_riendas, armado_de_crucetas, 
+                                    montaje_aislador, tendido, flechado, engrampado, fecha_montaje, 
+                                    tipo_de_equipo, observacion_ofm
                                 )
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ON CONFLICT(piquete) DO UPDATE SET
+                                    tramo = excluded.tramo,
+                                    tipo_estructura = excluded.tipo_estructura,
+                                    cabezal = excluded.cabezal,
+                                    longitud_poste = excluded.longitud_poste,
+                                    cantidad_aisladores = excluded.cantidad_aisladores,
+                                    metros_tendido = excluded.metros_tendido,
+                                    m3_excavacion = excluded.m3_excavacion,
+                                    excavacion = COALESCE(excluded.excavacion, piquetes.excavacion),
+                                    verticalizado = COALESCE(excluded.verticalizado, piquetes.verticalizado),
+                                    desfile_de_poste = COALESCE(excluded.desfile_de_poste, piquetes.desfile_de_poste),
+                                    montaje_riendas = COALESCE(excluded.montaje_riendas, piquetes.montaje_riendas),
+                                    armado_de_crucetas = COALESCE(excluded.armado_de_crucetas, piquetes.armado_de_crucetas),
+                                    montaje_aislador = COALESCE(excluded.montaje_aislador, piquetes.montaje_aislador),
+                                    tendido = COALESCE(excluded.tendido, piquetes.tendido),
+                                    flechado = COALESCE(excluded.flechado, piquetes.flechado),
+                                    engrampado = COALESCE(excluded.engrampado, piquetes.engrampado),
+                                    fecha_montaje = COALESCE(excluded.fecha_montaje, piquetes.fecha_montaje),
+                                    tipo_de_equipo = COALESCE(excluded.tipo_de_equipo, piquetes.tipo_de_equipo),
+                                    observacion_ofm = COALESCE(excluded.observacion_ofm, piquetes.observacion_ofm)
                             """, (
                                 nombre_proyecto_manual, piquete_val, get_val(row, "TIPO ESTRUCTURA") or "S/D",
                                 get_val(row, "CABEZAL") or "S/D", get_val(row, "LONGITUD POSTE"), cant_aisl, m_tend, m3_exc,
@@ -430,104 +452,10 @@ if opcion == "📥 Migración Inicial (Excel)":
                     if registros_cargados > 0:
                         upload_db_to_drive()
                         st.session_state.proyecto_activo = nombre_proyecto_manual
-                        st.success(f"✔️ ¡Migración exitosa! Se procesaron {registros_cargados} piquetes correctamente.")
+                        st.success(f"✔️ ¡Actualización exitosa! Se procesaron {registros_cargados} piquetes respetando los adjuntos existentes.")
                         st.rerun()
             except Exception as e:
                 st.error(f"❌ Error al procesar el Excel: {e}")
-
-# -------------------------------------------------------------------------
-# MÓDULO 2: VISIÓN POR PROYECTO Y DETALLE
-# -------------------------------------------------------------------------
-elif opcion == "📂 Visión por Proyecto y Detalle":
-    st.subheader("📂 Visión Detallada por Proyecto / Frente")
-    
-    conn = conectar_db()
-    try:
-        proyectos_df = pd.read_sql_query("SELECT DISTINCT tramo FROM piquetes", conn)
-        lista_proyectos = [t for t in proyectos_df['tramo'].dropna().tolist() if str(t).strip().lower() != 'nan' and str(t).strip() != '']
-    except Exception as e:
-        st.error(f"Error al conectar con la base de datos: {e}")
-        conn.close()
-        lista_proyectos = []
-
-    if not lista_proyectos:
-        st.warning("No hay datos cargados en la base de datos aún. Realiza una migración desde la pestaña de Excel.")
-        conn.close()
-    else:
-        idx_defecto = 0
-        if st.session_state.proyecto_activo in lista_proyectos:
-            idx_defecto = lista_proyectos.index(st.session_state.proyecto_activo)
-
-        proyecto_sel = st.selectbox("Seleccione el Proyecto / Frente a consultar:", lista_proyectos, index=idx_defecto)
-        st.session_state.proyecto_activo = proyecto_sel
-
-        if proyecto_sel:
-            df_proyecto = pd.read_sql_query("SELECT * FROM piquetes WHERE tramo = ?", conn, params=(proyecto_sel,))
-            df_proyecto["Avance_%"] = df_proyecto.apply(calcular_avance_piquete, axis=1)
-
-            total_piquetes = len(df_proyecto)
-            avance_promedio = int(df_proyecto["Avance_%"].mean()) if total_piquetes > 0 else 0
-            completados = len(df_proyecto[df_proyecto["Avance_%"] >= 99.9])
-
-            total_aisladores = pd.to_numeric(df_proyecto["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
-            aisladores_instalados = pd.to_numeric(df_proyecto[df_proyecto["montaje_aislador"].notna() & (~df_proyecto["montaje_aislador"].astype(str).str.upper().isin(["N/A", "NO APLICA"]))]["cantidad_aisladores"], errors='coerce').fillna(0).astype(int).sum()
-
-            total_metros = df_proyecto["metros_tendido"].fillna(0).sum()
-            metros_tendidos = df_proyecto[df_proyecto["tendido"].notna() & (~df_proyecto["tendido"].astype(str).str.upper().isin(["N/A", "NO APLICA"]))]["metros_tendido"].fillna(0).sum()
-
-            total_m3 = df_proyecto["m3_excavacion"].fillna(0).sum()
-            m3_excavados = df_proyecto[df_proyecto["excavacion"].notna() & (~df_proyecto["excavacion"].astype(str).str.upper().isin(["N/A", "NO APLICA"]))]["m3_excavacion"].fillna(0).sum()
-
-            col1, col2, col3, col4, col5, col6 = st.columns(6)
-            with col1:
-                st.markdown(f"""<div class='kpi-card' style='border-left-color: #3b82f6;'><div class='kpi-title'>📍 Total Piquetes</div><div class='kpi-value'>{total_piquetes}</div></div>""", unsafe_allow_html=True)
-            with col2:
-                st.markdown(f"""<div class='kpi-card' style='border-left-color: #10b981;'><div class='kpi-title'>✅ Piquetes 100%</div><div class='kpi-value'>{completados}</div></div>""", unsafe_allow_html=True)
-            with col3:
-                st.markdown(f"""<div class='kpi-card' style='border-left-color: #f59e0b;'><div class='kpi-title'>📈 % Avance Físico</div><div class='kpi-value'>{avance_promedio}%</div></div>""", unsafe_allow_html=True)
-            with col4:
-                st.markdown(f"""<div class='kpi-card' style='border-left-color: #8b5cf6;'><div class='kpi-title'>🔌 Aisladores Montados</div><div class='kpi-value'>{int(aisladores_instalados)} / {int(total_aisladores)}</div></div>""", unsafe_allow_html=True)
-            with col5:
-                st.markdown(f"""<div class='kpi-card' style='border-left-color: #06b6d4;'><div class='kpi-title'>📏 Metros Tendidos</div><div class='kpi-value'>{int(metros_tendidos)} / {int(total_metros)} m</div></div>""", unsafe_allow_html=True)
-            with col6:
-                st.markdown(f"""<div class='kpi-card' style='border-left-color: #eab308;'><div class='kpi-title'>⛏️ Excavación (m³)</div><div class='kpi-value'>{m3_excavados:.1f} / {total_m3:.1f} m³</div></div>""", unsafe_allow_html=True)
-
-            st.markdown("---")
-            st.markdown("### 🛠️ Estado de los 9 Hitos Operativos")
-            
-            cols_hitos = st.columns(3)
-            for idx, hito in enumerate(HITOS_OBRA):
-                piquetes_aplicables = df_proyecto[~df_proyecto[hito].astype(str).str.upper().isin(["N/A", "NO APLICA", "NA", "N/D"])]
-                total_aplicable = len(piquetes_aplicables)
-                cant_completada = piquetes_aplicables[hito].notna().sum()
-                pct_hito = (cant_completada / total_aplicable * 100) if total_aplicable > 0 else 0
-                
-                with cols_hitos[idx % 3]:
-                    st.markdown(f"""
-                        <div class='hito-card'>
-                            <div style='font-size: 13px; font-weight: 700; color: #38bdf8;'>{NOMBRES_HITOS[hito]}</div>
-                            <div style='font-size: 20px; font-weight: 800; color: #ffffff; margin-top:2px;'>{cant_completada} / {total_aplicable} <span style='font-size:13px; color:#94a3b8;'>({int(pct_hito)}%)</span></div>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    st.progress(int(pct_hito) / 100)
-
-            st.markdown("---")
-            st.subheader("🔍 Filtrar y Explorar Piquetes Cargados")
-            
-            buscar_piquete = st.text_input("Buscar por Número / Código de Piquete:")
-            if buscar_piquete:
-                df_proyecto = df_proyecto[df_proyecto['piquete'].astype(str).str.contains(buscar_piquete, case=False, na=False)]
-
-            st.dataframe(df_proyecto, use_container_width=True)
-
-            csv = df_proyecto.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label=f"📥 Descargar datos del proyecto {proyecto_sel} (CSV)",
-                data=csv,
-                file_name=f"reporte_{proyecto_sel}.csv",
-            )
-
-    conn.close()
 
 # -------------------------------------------------------------------------
 # MÓDULO 3: INVENTARIO Y CONTEO POR COLUMNAS
