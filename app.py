@@ -5,38 +5,63 @@ import sqlite3
 import plotly.express as px
 import os
 import io
+import time
 import smtplib
+import socket
+from email.utils import parseaddr
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import streamlit.components.v1 as components
-import json
+
+# Google API modules
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+from googleapiclient.errors import HttpError
+from google.auth.exceptions import GoogleAuthError
 
+# ==========================================
+# 1. CONSTANTES Y CONFIGURACIÓN INICIAL
+# ==========================================
 DRIVE_FOLDER_ID = "1Gv2m6_uBDjQkM4QluwO_Zmhjdw4LM85X"
 DB_FILE_NAME = "obra_trazabilidad.db"
+CARPA_ARCHIVOS = "archivos_obra"
 
-# --- FUNCIONES GOOGLE DRIVE ---
+if not os.path.exists(CARPA_ARCHIVOS):
+    os.makedirs(CARPA_ARCHIVOS)
+
+# ==========================================
+# 2. FUNCIONES DE GOOGLE DRIVE (CON CONTROL DE ERRORES)
+# ==========================================
 def get_drive_service():
+    """Inicializa y autentica el servicio de Google Drive."""
     if "gcp_service_account" not in st.secrets:
+        st.error("❌ No se encontraron las credenciales 'gcp_service_account' en Secrets.")
         return None
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    
-    if "private_key" in creds_dict:
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+    try:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
-    creds = service_account.Credentials.from_service_account_info(
-        creds_dict, scopes=['https://www.googleapis.com/auth/drive']
-    )
-    return build('drive', 'v3', credentials=creds)
+        creds = service_account.Credentials.from_service_account_info(
+            creds_dict, scopes=['https://www.googleapis.com/auth/drive']
+        )
+        return build('drive', 'v3', credentials=creds)
+    except GoogleAuthError as auth_err:
+        st.error(f"❌ Error de autenticación en Google Drive: {auth_err}")
+        return None
+    except Exception as e:
+        st.error(f"❌ Error al inicializar servicio de Drive: {e}")
+        return None
 
 def download_db_from_drive():
+    """Descarga la base de datos SQLite desde Google Drive."""
+    service = get_drive_service()
+    if not service:
+        return
+
     try:
-        service = get_drive_service()
-        if not service:
-            return
         query = f"name = '{DB_FILE_NAME}' and trashed = false"
         if DRIVE_FOLDER_ID:
             query += f" and '{DRIVE_FOLDER_ID}' in parents"
@@ -53,21 +78,24 @@ def download_db_from_drive():
                 while not done:
                     _, done = downloader.next_chunk()
             print("Base de datos descargada de Drive correctamente.")
+    except HttpError as error:
+        print(f"Error HTTP al descargar de Drive [{error.resp.status}]: {error._get_reason()}")
     except Exception as e:
-        print(f"Error al descargar de Drive: {e}")
+        print(f"Error general al descargar de Drive: {e}")
 
-def upload_db_to_drive():
-    try:
-        service = get_drive_service()
-        if not service:
-            return False
+def upload_db_to_drive(max_intentos=3):
+    """Suba/sincroniza la BD SQLite a Google Drive con reintentos exponencial (backoff)."""
+    service = get_drive_service()
+    if not service:
+        return False
+
+    def _ejecutar_subida():
         query = f"name = '{DB_FILE_NAME}' and trashed = false"
         if DRIVE_FOLDER_ID:
             query += f" and '{DRIVE_FOLDER_ID}' in parents"
             
         results = service.files().list(q=query, fields="files(id, name)").execute()
         files = results.get('files', [])
-        
         media = MediaFileUpload(DB_FILE_NAME, mimetype='application/x-sqlite3', resumable=True)
         
         if files:
@@ -78,22 +106,158 @@ def upload_db_to_drive():
             if DRIVE_FOLDER_ID:
                 file_metadata['parents'] = [DRIVE_FOLDER_ID]
             archivo = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        
-        st.success(f"✔️ Backup sincronizado en Google Drive con éxito (ID: {archivo.get('id')}).")
-        return True
-    except Exception as e:
-        st.error(f"❌ Error al sincronizar con Google Drive: {e}")
-        return False
+        return archivo.get('id')
 
+    for intento in range(1, max_intentos + 1):
+        try:
+            file_id = _ejecutar_subida()
+            st.success(f"✔️ Backup sincronizado en Google Drive con éxito (ID: {file_id}).")
+            return True
+        except HttpError as error:
+            codigo = error.resp.status
+            if codigo == 404:
+                st.error("❌ Error Drive: La carpeta especificada no fue encontrada (404).")
+                break
+            elif codigo in [403, 429, 500, 503] and intento < max_intentos:
+                tiempo_espera = intento * 2
+                st.warning(f"⚠️ Limitación de cuota/red en Drive (HTTP {codigo}). Reintentando en {tiempo_espera}s...")
+                time.sleep(tiempo_espera)
+            else:
+                st.error(f"❌ Error HTTP Google Drive [{codigo}]: {error._get_reason()}")
+                break
+        except GoogleAuthError as auth_err:
+            st.error(f"❌ Error de permisos en Google Drive: {auth_err}")
+            break
+        except Exception as e:
+            st.error(f"❌ Error inesperado al sincronizar con Google Drive: {e}")
+            break
+
+    return False
+
+# Descarga inicial
 if "db_descargada" not in st.session_state:
     download_db_from_drive()
     st.session_state.db_descargada = True
 
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzado", page_icon="⚡")
+# ==========================================
+# 3. FUNCIONES DE ENVÍO DE CORREO SMTP
+# ==========================================
+def validar_email(email):
+    """Valida la sintaxis del correo."""
+    nombre, direccion = parseaddr(email)
+    return '@' in direccion and '.' in direccion.split('@')[-1]
 
-if "proyecto_activo" not in st.session_state:
-    st.session_state.proyecto_activo = None
+def enviar_reporte_correo(destinatarios, asunto, cuerpo, archivo_bytes, nombre_archivo):
+    """Envía reporte por correo con soporte para múltiples destinatarios, validación y manejo de errores."""
+    try:
+        EMAIL_EMISOR = st.secrets["SMTP_EMAIL"]
+        PASSWORD_EMISOR = st.secrets["SMTP_PASSWORD"]
+    except Exception:
+        st.error("❌ No se encontraron las credenciales 'SMTP_EMAIL' y 'SMTP_PASSWORD' en Secrets de Streamlit.")
+        return False
+
+    destinatarios_validos = [d for d in destinatarios if validar_email(d)]
+    if not destinatarios_validos:
+        st.error("❌ Ninguna dirección de correo ingresada es válida.")
+        return False
+
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_EMISOR
+    msg['To'] = ", ".join(destinatarios_validos)
+    msg['Subject'] = asunto
+    msg.attach(MIMEText(cuerpo, 'html'))
+
+    adjunto = MIMEApplication(archivo_bytes, _subtype="xlsx")
+    adjunto.add_header('Content-Disposition', 'attachment', filename=nombre_archivo)
+    msg.attach(adjunto)
+
+    try:
+        with smtplib.SMTP('smtp.gmail.com', 587, timeout=15) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(EMAIL_EMISOR, PASSWORD_EMISOR)
+            server.send_message(msg)
+            return True
+    except smtplib.SMTPAuthenticationError:
+        st.error("❌ Error SMTP: Autenticación fallida. Verifique sus credenciales (use contraseña de aplicación).")
+    except smtplib.SMTPConnectError:
+        st.error("❌ Error SMTP: No se pudo establecer conexión con el servidor SMTP.")
+    except socket.timeout:
+        st.error("❌ Error de Red: Tiempo de espera agotado al conectar con el servidor de correo.")
+    except smtplib.SMTPException as e:
+        st.error(f"❌ Error en protocolo SMTP: {e}")
+    except Exception as e:
+        st.error(f"❌ Error inesperado al enviar correo: {e}")
+
+    return False
+
+# ==========================================
+# 4. BASE DE DATOS LOCAL Y LÓGICA TÉCNICA
+# ==========================================
+def conectar_db():
+    return sqlite3.connect(DB_FILE_NAME)
+
+def inicializar_db():
+    conn = conectar_db()
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(piquetes)")
+    columnas = [col[1] for col in cursor.fetchall()]
+    
+    if len(columnas) > 0 and ("cabezal" not in columnas or "armado_de_crucetas" not in columnas):
+        conn.close()
+        try: 
+            os.remove(DB_FILE_NAME)
+        except: 
+            pass
+        conn = conectar_db()
+        cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS piquetes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tramo TEXT,
+            piquete TEXT UNIQUE,
+            tipo_estructura TEXT,
+            cabezal TEXT,
+            longitud_poste TEXT,
+            cantidad_aisladores INTEGER DEFAULT 0,
+            metros_tendido REAL DEFAULT 0,
+            m3_excavacion REAL DEFAULT 0,
+            excavacion TEXT,
+            verticalizado TEXT,
+            desfile_de_poste TEXT,
+            montaje_riendas TEXT,
+            armado_de_crucetas TEXT,
+            montaje_aislador TEXT,
+            tendido TEXT,
+            flechado TEXT,
+            engrampado TEXT,
+            fecha_montaje TEXT,
+            tipo_de_equipo TEXT,
+            anexo_montaje TEXT,
+            idi TEXT,
+            observacion_ofm TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cronogramas (
+            tramo TEXT PRIMARY KEY,
+            inicio TEXT,
+            entrega TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS metas_ritmo (
+            tramo TEXT PRIMARY KEY,
+            ritmo_objetivo REAL,
+            fecha_meta TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+inicializar_db()
 
 HITOS_OBRA = [
     "excavacion", 
@@ -122,7 +286,6 @@ NOMBRES_HITOS = {
 def calcular_avance_piquete(row_piquete):
     hitos_validos = 0
     hitos_completados = 0
-    
     for hito in HITOS_OBRA:
         val = str(row_piquete.get(hito, "")).strip().upper()
         if val in ["N/A", "NO APLICA", "NA", "N/D"]:
@@ -133,7 +296,6 @@ def calcular_avance_piquete(row_piquete):
             
     if hitos_validos == 0:
         return 100.0 if hitos_completados == 0 else 0.0
-        
     return round((hitos_completados / hitos_validos) * 100, 2)
 
 def normalizar_fecha(val):
@@ -152,40 +314,18 @@ def normalizar_fecha(val):
         pass
     return val_str
 
-def enviar_reporte_correo(destinatarios, asunto, cuerpo, archivo_bytes, nombre_archivo):
-    try:
-        EMAIL_EMISOR = st.secrets["SMTP_EMAIL"]
-        PASSWORD_EMISOR = st.secrets["SMTP_PASSWORD"]
-    except Exception:
-        st.error("❌ No se encontraron las credenciales 'SMTP_EMAIL' y 'SMTP_PASSWORD' en Secrets de Streamlit.")
-        return False
+# ==========================================
+# 5. CONFIGURACIÓN DE INTERFAZ Y SIDEBAR
+# ==========================================
+st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzado", page_icon="⚡")
 
-    msg = MIMEMultipart()
-    msg['From'] = EMAIL_EMISOR
-    msg['To'] = ", ".join(destinatarios)
-    msg['Subject'] = asunto
-
-    msg.attach(MIMEText(cuerpo, 'html'))
-
-    adjunto = MIMEApplication(archivo_bytes, _subtype="xlsx")
-    adjunto.add_header('Content-Disposition', 'attachment', filename=nombre_archivo)
-    msg.attach(adjunto)
-
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(EMAIL_EMISOR, PASSWORD_EMISOR)
-        server.send_message(msg)
-        server.quit()
-        return True
-    except Exception as e:
-        st.error(f"❌ Error al enviar el correo: {e}")
-        return False
+if "proyecto_activo" not in st.session_state:
+    st.session_state.proyecto_activo = None
 
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3227/3227840.png", width=70)
 st.sidebar.markdown("👤 **Modo:** Acceso Total Abierto")
-
 st.sidebar.title("Navegación del Sistema")
+
 opcion = st.sidebar.radio("Ir a la pestaña:", [
     "📈 Analítica Avanzada y KPIs", 
     "📂 Visión por Proyecto y Detalle",
@@ -252,77 +392,11 @@ st.markdown("""
 st.title("⚡ Panel de Control de Obra Eléctrica Avanzado")
 st.markdown("---")
 
-def conectar_db():
-    return sqlite3.connect(DB_FILE_NAME)
+# ==========================================
+# 6. MÓDULOS DE LA APLICACIÓN
+# ==========================================
 
-def inicializar_db():
-    conn = conectar_db()
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(piquetes)")
-    columnas = [col[1] for col in cursor.fetchall()]
-    
-    if len(columnas) > 0 and ("cabezal" not in columnas or "armado_de_crucetas" not in columnas):
-        conn.close()
-        try: 
-            os.remove(DB_FILE_NAME)
-        except: 
-            pass
-        conn = conectar_db()
-        cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS piquetes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tramo TEXT,
-            piquete TEXT UNIQUE,
-            tipo_estructura TEXT,
-            cabezal TEXT,
-            longitud_poste TEXT,
-            cantidad_aisladores INTEGER DEFAULT 0,
-            metros_tendido REAL DEFAULT 0,
-            m3_excavacion REAL DEFAULT 0,
-            excavacion TEXT,
-            verticalizado TEXT,
-            desfile_de_poste TEXT,
-            montaje_riendas TEXT,
-            armado_de_crucetas TEXT,
-            montaje_aislador TEXT,
-            tendido TEXT,
-            flechado TEXT,
-            engrampado TEXT,
-            fecha_montaje TEXT,
-            tipo_de_equipo TEXT,
-            anexo_montaje TEXT,
-            idi TEXT,
-            observacion_ofm TEXT
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cronogramas (
-            tramo TEXT PRIMARY KEY,
-            inicio TEXT,
-            entrega TEXT
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS metas_ritmo (
-            tramo TEXT PRIMARY KEY,
-            ritmo_objetivo REAL,
-            fecha_meta TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-inicializar_db()
-
-CARPA_ARCHIVOS = "archivos_obra"
-if not os.path.exists(CARPA_ARCHIVOS):
-    os.makedirs(CARPA_ARCHIVOS)
-
-# -------------------------------------------------------------------------
 # MÓDULO 5: MIGRACIÓN INICIAL DESDE EXCEL
-# -------------------------------------------------------------------------
 if opcion == "📥 Migración Inicial (Excel)":
     st.subheader("📥 Inicialización y Carga de Planilla Maestra Excel")
     st.markdown("Cargue el archivo Excel inicial para estructurar los piquetes y frentes de trabajo de forma limpia.")
@@ -349,7 +423,6 @@ if opcion == "📥 Migración Inicial (Excel)":
                 
                 archivo_excel.seek(0)
                 df = pd.read_excel(archivo_excel, skiprows=skip_rows)
-                
                 df.columns = df.columns.astype(str).str.strip().str.upper().str.replace("_", " ")
                 df = df.loc[:, ~df.columns.duplicated()]
                 
@@ -357,7 +430,6 @@ if opcion == "📥 Migración Inicial (Excel)":
                     st.error(f"❌ No se encontró la columna 'PIQUETE'. Columnas detectadas: {list(df.columns)}")
                 else:
                     df = df.dropna(subset=["PIQUETE"])
-                    
                     conn = conectar_db()
                     conn.execute("DELETE FROM piquetes WHERE tramo = ?", (nombre_proyecto_manual,))
                     
@@ -378,24 +450,20 @@ if opcion == "📥 Migración Inicial (Excel)":
                         piquete_val = get_val(row, "PIQUETE")
                         if piquete_val:
                             cant_aisl_raw = get_val(row, "CANTIDAD AISLADORES", "CANT AISLADORES", "CANT. AISLADORES", "AISLADORES", "CANT AISLADOR", "CANTIDAD DE AISLADORES", "AISLADOR")
-                            if cant_aisl_raw is not None and str(cant_aisl_raw).strip() != "":
-                                try:
-                                    val_clean = str(cant_aisl_raw).replace(',', '.').strip()
-                                    cant_aisl = int(float(val_clean))
-                                except (ValueError, TypeError):
-                                    cant_aisl = 0
-                            else:
+                            try:
+                                cant_aisl = int(float(str(cant_aisl_raw).replace(',', '.').strip())) if cant_aisl_raw else 0
+                            except (ValueError, TypeError):
                                 cant_aisl = 0
 
                             m_tend = get_val(row, "METROS TENDIDO", "METROS", "VANO", "DISTANCIA")
                             try:
-                                m_tend = float(str(m_tend).replace(',', '.').strip()) if m_tend is not None else 0.0
+                                m_tend = float(str(m_tend).replace(',', '.').strip()) if m_tend else 0.0
                             except (ValueError, TypeError):
                                 m_tend = 0.0
 
                             m3_exc = get_val(row, "M3 EXCAVACION", "VOLUMEN EXCAVACION", "EXCAVACION M3")
                             try:
-                                m3_exc = float(str(m3_exc).replace(',', '.').strip()) if m3_exc is not None else 0.0
+                                m3_exc = float(str(m3_exc).replace(',', '.').strip()) if m3_exc else 0.0
                             except (ValueError, TypeError):
                                 m3_exc = 0.0
 
@@ -435,36 +503,32 @@ if opcion == "📥 Migración Inicial (Excel)":
             except Exception as e:
                 st.error(f"❌ Error al procesar el Excel: {e}")
 
-# -------------------------------------------------------------------------
 # MÓDULO 2: VISIÓN POR PROYECTO Y DETALLE
-# -------------------------------------------------------------------------
 elif opcion == "📂 Visión por Proyecto y Detalle":
     st.subheader("📂 Visión Detallada por Proyecto / Frente")
-    
     conn = conectar_db()
     try:
         proyectos_df = pd.read_sql_query("SELECT DISTINCT tramo FROM piquetes", conn)
         lista_proyectos = [t for t in proyectos_df['tramo'].dropna().tolist() if str(t).strip().lower() != 'nan' and str(t).strip() != '']
     except Exception as e:
         st.error(f"Error al conectar con la base de datos: {e}")
-        conn.close()
         lista_proyectos = []
+    finally:
+        conn.close()
 
     if not lista_proyectos:
         st.warning("No hay datos cargados en la base de datos aún. Realiza una migración desde la pestaña de Excel.")
-        conn.close()
     else:
-        idx_defecto = 0
-        if st.session_state.proyecto_activo in lista_proyectos:
-            idx_defecto = lista_proyectos.index(st.session_state.proyecto_activo)
-
+        idx_defecto = lista_proyectos.index(st.session_state.proyecto_activo) if st.session_state.proyecto_activo in lista_proyectos else 0
         proyecto_sel = st.selectbox("Seleccione el Proyecto / Frente a consultar:", lista_proyectos, index=idx_defecto)
         st.session_state.proyecto_activo = proyecto_sel
 
         if proyecto_sel:
+            conn = conectar_db()
             df_proyecto = pd.read_sql_query("SELECT * FROM piquetes WHERE tramo = ?", conn, params=(proyecto_sel,))
-            df_proyecto["Avance_%"] = df_proyecto.apply(calcular_avance_piquete, axis=1)
+            conn.close()
 
+            df_proyecto["Avance_%"] = df_proyecto.apply(calcular_avance_piquete, axis=1)
             total_piquetes = len(df_proyecto)
             avance_promedio = int(df_proyecto["Avance_%"].mean()) if total_piquetes > 0 else 0
             completados = len(df_proyecto[df_proyecto["Avance_%"] >= 99.9])
@@ -494,7 +558,6 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
 
             st.markdown("---")
             st.markdown("### 🛠️ Estado de los 9 Hitos Operativos")
-            
             cols_hitos = st.columns(3)
             for idx, hito in enumerate(HITOS_OBRA):
                 piquetes_aplicables = df_proyecto[~df_proyecto[hito].astype(str).str.upper().isin(["N/A", "NO APLICA", "NA", "N/D"])]
@@ -513,28 +576,20 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
 
             st.markdown("---")
             st.subheader("🔍 Filtrar y Explorar Piquetes Cargados")
-            
             buscar_piquete = st.text_input("Buscar por Número / Código de Piquete:")
             if buscar_piquete:
                 df_proyecto = df_proyecto[df_proyecto['piquete'].astype(str).str.contains(buscar_piquete, case=False, na=False)]
 
             st.dataframe(df_proyecto, use_container_width=True)
-
-            csv = df_proyecto.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label=f"📥 Descargar datos del proyecto {proyecto_sel} (CSV)",
-                data=csv,
+                data=df_proyecto.to_csv(index=False).encode('utf-8'),
                 file_name=f"reporte_{proyecto_sel}.csv",
             )
 
-    conn.close()
-
-# -------------------------------------------------------------------------
 # MÓDULO 3: INVENTARIO Y CONTEO POR COLUMNAS
-# -------------------------------------------------------------------------
 elif opcion == "📦 Inventario y Conteo de Columnas":
     st.subheader("📦 Métricas de Inventario y Control de Columnas")
-    
     conn = conectar_db()
     df_obra = pd.read_sql_query("SELECT * FROM piquetes", conn)
     conn.close()
@@ -543,13 +598,9 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         st.info("No hay datos cargados en el sistema de control.")
     else:
         df_obra["Avance_%"] = df_obra.apply(calcular_avance_piquete, axis=1)
-
         tramos_validos = [t for t in df_obra["tramo"].dropna().unique() if str(t).strip().lower() != "nan" and str(t).strip() != ""]
         
-        idx_defecto = 0
-        if st.session_state.proyecto_activo in tramos_validos:
-            idx_defecto = tramos_validos.index(st.session_state.proyecto_activo)
-            
+        idx_defecto = tramos_validos.index(st.session_state.proyecto_activo) if st.session_state.proyecto_activo in tramos_validos else 0
         tramo_sel = st.selectbox("Filtrar Análisis por Frente/Tramo:", tramos_validos, index=idx_defecto)
         st.session_state.proyecto_activo = tramo_sel
         df_inv = df_obra[df_obra["tramo"] == tramo_sel].copy()
@@ -591,9 +642,7 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         col_sel = st.selectbox("Seleccione Parámetro a Graficar:", list(columnas_analizar.values()))
         col_real = [k for k, v in columnas_analizar.items() if v == col_sel][0]
         
-        df_filtrado_grafico = df_inv[[col_real]].copy()
-        df_filtrado_grafico[col_real] = df_filtrado_grafico[col_real].replace(["None", "nan", "-", ""], None)
-        df_filtrado_grafico = df_filtrado_grafico.dropna()
+        df_filtrado_grafico = df_inv[[col_real]].copy().replace(["None", "nan", "-", ""], None).dropna()
         
         if df_filtrado_grafico.empty:
             st.warning("No se detectaron registros válidos cargados para este parámetro específico.")
@@ -621,12 +670,9 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
         with st.expander("🔍 Ver Listado Detallado de este Frente"):
             st.dataframe(df_inv[["piquete", "tipo_estructura", "cabezal", "longitud_poste", "cantidad_aisladores", "metros_tendido", "m3_excavacion", "tipo_de_equipo", "Avance_%"]], use_container_width=True)
 
-# -------------------------------------------------------------------------
 # MÓDULO 4: CARGA Y GESTIÓN DE CAMPO
-# -------------------------------------------------------------------------
 elif opcion == "📝 Carga y Gestión de Campo":
     st.subheader("📝 Gestión Operativa y Certificación de Avances")
-    
     conn = conectar_db()
     df_combos = pd.read_sql_query("SELECT tramo, piquete FROM piquetes", conn)
     conn.close()
@@ -635,11 +681,8 @@ elif opcion == "📝 Carga y Gestión de Campo":
         st.info("Sin registros operativos. Por favor, cargue la planilla inicial en la pestaña de Migración.")
     else:
         tramos_fijos = [t for t in df_combos["tramo"].dropna().unique() if str(t).strip().lower() != "nan" and str(t).strip() != ""]
+        idx_defecto = tramos_fijos.index(st.session_state.proyecto_activo) if st.session_state.proyecto_activo in tramos_fijos else 0
         
-        idx_defecto = 0
-        if st.session_state.proyecto_activo in tramos_fijos:
-            idx_defecto = tramos_fijos.index(st.session_state.proyecto_activo)
-            
         tramo_sel = st.selectbox("Seleccione Frente de Trabajo:", tramos_fijos, index=idx_defecto)
         st.session_state.proyecto_activo = tramo_sel
         piquetes_filtrados = df_combos[df_combos["tramo"] == tramo_sel]["piquete"].unique()
@@ -652,20 +695,9 @@ elif opcion == "📝 Carga y Gestión de Campo":
         cabezal_val = p_info["cabezal"] if p_info["cabezal"] and str(p_info["cabezal"]) != "None" else "S/D"
         l_poste = p_info["longitud_poste"] if p_info["longitud_poste"] and str(p_info["longitud_poste"]) != "None" else "N/A"
         
-        try:
-            cant_aisl_actual = int(p_info["cantidad_aisladores"]) if pd.notna(p_info["cantidad_aisladores"]) else 0
-        except (ValueError, TypeError):
-            cant_aisl_actual = 0
-            
-        try:
-            metros_tendido_actual = max(0.0, float(p_info["metros_tendido"])) if pd.notna(p_info["metros_tendido"]) else 0.0
-        except (ValueError, TypeError):
-            metros_tendido_actual = 0.0
-
-        try:
-            m3_excavacion_actual = max(0.0, float(p_info["m3_excavacion"])) if pd.notna(p_info["m3_excavacion"]) else 0.0
-        except (ValueError, TypeError):
-            m3_excavacion_actual = 0.0
+        cant_aisl_actual = int(p_info["cantidad_aisladores"]) if pd.notna(p_info["cantidad_aisladores"]) else 0
+        metros_tendido_actual = max(0.0, float(p_info["metros_tendido"])) if pd.notna(p_info["metros_tendido"]) else 0.0
+        m3_excavacion_actual = max(0.0, float(p_info["m3_excavacion"])) if pd.notna(p_info["m3_excavacion"]) else 0.0
 
         tipo_equipo_val = p_info.get("tipo_de_equipo", "") or ""
         obs_ofm_val = p_info.get("observacion_ofm", "") or ""
@@ -707,7 +739,6 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 return None
 
             st.markdown("##### ⚙️ Configuración, Mediciones y Volúmenes del Piquete")
-            
             c_aisl1, c_aisl2, c_aisl3, c_aisl4 = st.columns(4)
             with c_aisl1:
                 cabezal_input = st.text_input("🧩 Cabezal:", value=str(cabezal_val))
@@ -803,9 +834,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
             st.success(f"✔️ Historial y observaciones del Piquete {piquete_sel} guardados correctamente.")
             st.rerun()
 
-# -------------------------------------------------------------------------
 # MÓDULO 1: ANALÍTICA AVANZADA Y KPIS
-# -------------------------------------------------------------------------
 else:
     conn = conectar_db()
     df_obra = pd.read_sql_query("SELECT * FROM piquetes", conn)
@@ -817,13 +846,9 @@ else:
         st.info("No existen registros de obra para procesar analíticas. Vaya al módulo de Migración.")
     else:
         df_obra["Avance_%"] = df_obra.apply(calcular_avance_piquete, axis=1)
-
         tramos_validos = [t for t in df_obra["tramo"].dropna().unique() if str(t).strip().lower() != "nan" and str(t).strip() != ""]
         
-        idx_defecto = 0
-        if st.session_state.proyecto_activo in tramos_validos:
-            idx_defecto = tramos_validos.index(st.session_state.proyecto_activo)
-            
+        idx_defecto = tramos_validos.index(st.session_state.proyecto_activo) if st.session_state.proyecto_activo in tramos_validos else 0
         tramo_sel = st.selectbox("Frente Operativo / Proyecto Seleccionado:", tramos_validos, index=idx_defecto)
         st.session_state.proyecto_activo = tramo_sel
         df_tramo = df_obra[df_obra["tramo"] == tramo_sel]
@@ -897,7 +922,6 @@ else:
         productividad_media = round(hitos_completados / dias_transcurridos, 2)
 
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        
         with kpi1:
             st.markdown(f"""
                 <div class='kpi-card' style='border-left-color: #3b82f6;'>
@@ -956,15 +980,8 @@ else:
         col_h1, col_h2 = st.columns([2, 1])
         with col_h1:
             fig_hitos_barras = px.bar(
-                df_grafico_hitos, 
-                x="Porcentaje", 
-                y="Hito", 
-                orientation='h',
-                text="Porcentaje", 
-                color="Porcentaje",
-                color_continuous_scale="Blues", 
-                template="plotly_dark",
-                labels={"Porcentaje": "% de Cumplimiento"}
+                df_grafico_hitos, x="Porcentaje", y="Hito", orientation='h',
+                text="Porcentaje", color="Porcentaje", color_continuous_scale="Blues", template="plotly_dark"
             )
             fig_hitos_barras.update_traces(texttemplate='%{text}%', textposition='outside')
             fig_hitos_barras.update_layout(
@@ -995,7 +1012,6 @@ else:
             txt_sub = f"Faltan {piquetes_pendientes} piquetes ({dias_restantes} días rest.)"
 
         col_mid1, col_mid2, col_mid3 = st.columns([1.1, 1.3, 1.1])
-
         with col_mid1:
             st.markdown(f"""
                 <div class='status-card' style='border-left: 5px solid {alerta_color};'>
@@ -1052,7 +1068,6 @@ else:
         ritmo_real_diario = round(completados_recientes / dias_evaluacion, 2)
 
         fechas_futuras = [hoy + pd.Timedelta(days=i) for i in range(dias_restantes + 1)]
-
         incremento_meta = (total_piquetes_tramo - piquetes_completados_100) / dias_restantes if dias_restantes > 0 else 0
         curva_meta = [min(total_piquetes_tramo, piquetes_completados_100 + (incremento_meta * i)) for i in range(dias_restantes + 1)]
         curva_real = [min(total_piquetes_tramo, piquetes_completados_100 + (ritmo_real_diario * i)) for i in range(dias_restantes + 1)]
@@ -1064,17 +1079,12 @@ else:
         })
 
         fig_proy = px.line(
-            df_proyeccion, 
-            x="Fecha", 
-            y="Piquetes Finalizados", 
-            color="Trayectoria",
-            template="plotly_dark",
+            df_proyeccion, x="Fecha", y="Piquetes Finalizados", color="Trayectoria", template="plotly_dark",
             color_discrete_map={
                 "Meta Necesaria (Contrato)": "#10b981", 
                 f"Tendencia Real ({ritmo_real_diario} piq/día)": "#ef4444" if ritmo_real_diario < ritmo_requerido_piquetes else "#3b82f6"
             }
         )
-        
         fig_proy.add_hline(y=total_piquetes_tramo, line_dash="dash", line_color="#64748b", annotation_text=f"Total Objetivo: {total_piquetes_tramo} piq.")
         fig_proy.update_layout(
             margin=dict(l=10, r=10, t=20, b=10), height=300,
@@ -1100,8 +1110,7 @@ else:
             {"Línea de Tiempo": "Proyección por Avance de Campo", "Inicio": inicio_base, "Fin": fin_proyectado, "Condición": "Proyección Real de Obra"}
         ])
         fig = px.timeline(
-            df_gantt, x_start="Inicio", x_end="Fin", y="Línea de Tiempo", color="Condición", 
-            template="plotly_dark",
+            df_gantt, x_start="Inicio", x_end="Fin", y="Línea de Tiempo", color="Condición", template="plotly_dark",
             color_discrete_map={"Contrato Base": "#1d4ed8", "Proyección Real de Obra": "#d97706"}
         )
         fig.update_yaxes(autorange="reversed", title="")
@@ -1132,19 +1141,10 @@ else:
             df_mostrar[hito] = df_mostrar[hito].apply(lambda x: "N/A" if str(x).upper() in ["N/A", "NO APLICA"] else (pd.to_datetime(x).strftime('%d/%m/%Y') if pd.notna(pd.to_datetime(x, errors='coerce')) else "-"))
             
         df_exportar = df_mostrar.rename(columns=renombrar_columnas_export)
-        
         columnas_export_orden = [
-            "tramo", 
-            "piquete", 
-            "tipo_estructura", 
-            "cabezal", 
-            "longitud_poste", 
-            "cantidad_aisladores", 
-            "metros_tendido", 
-            "m3_excavacion", 
-            "Avance_%", 
-            "anexo_montaje", 
-            "idi"
+            "tramo", "piquete", "tipo_estructura", "cabezal", "longitud_poste", 
+            "cantidad_aisladores", "metros_tendido", "m3_excavacion", "Avance_%", 
+            "anexo_montaje", "idi"
         ] + list(renombrar_columnas_export.values())
         
         st.markdown("---")
@@ -1155,7 +1155,6 @@ else:
             df_exportar[columnas_export_orden].to_excel(writer, sheet_name=f"Progreso_{tramo_sel}", index=False)
         
         col_exp1, col_exp2 = st.columns(2)
-        
         with col_exp1:
             st.download_button(
                 label="📊 Descargar Base Actualizada (Excel)",
