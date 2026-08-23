@@ -252,67 +252,63 @@ st.markdown("""
 st.title("⚡ Panel de Control de Obra Eléctrica Avanzado")
 st.markdown("---")
 
-def conectar_db():
-    return sqlite3.connect(DB_FILE_NAME)
-
 def inicializar_db():
-    conn = conectar_db()
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(piquetes)")
-    columnas = [col[1] for col in cursor.fetchall()]
-    
-    if len(columnas) > 0 and ("cabezal" not in columnas or "armado_de_crucetas" not in columnas):
-        conn.close()
-        try: 
-            os.remove(DB_FILE_NAME)
-        except: 
-            pass
-        conn = conectar_db()
+    with sqlite3.connect(DB_FILE_NAME) as conn:
         cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(piquetes)")
+        columnas = [col[1] for col in cursor.fetchall()]
+        
+        if len(columnas) > 0 and ("cabezal" not in columnas or "armado_de_crucetas" not in columnas):
+            conn.close()
+            try: 
+                os.remove(DB_FILE_NAME)
+            except: 
+                pass
+            conn = sqlite3.connect(DB_FILE_NAME)
+            cursor = conn.cursor()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS piquetes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tramo TEXT,
-            piquete TEXT UNIQUE,
-            tipo_estructura TEXT,
-            cabezal TEXT,
-            longitud_poste TEXT,
-            cantidad_aisladores INTEGER DEFAULT 0,
-            metros_tendido REAL DEFAULT 0,
-            m3_excavacion REAL DEFAULT 0,
-            excavacion TEXT,
-            verticalizado TEXT,
-            desfile_de_poste TEXT,
-            montaje_riendas TEXT,
-            armado_de_crucetas TEXT,
-            montaje_aislador TEXT,
-            tendido TEXT,
-            flechado TEXT,
-            engrampado TEXT,
-            fecha_montaje TEXT,
-            tipo_de_equipo TEXT,
-            anexo_montaje TEXT,
-            idi TEXT,
-            observacion_ofm TEXT
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cronogramas (
-            tramo TEXT PRIMARY KEY,
-            inicio TEXT,
-            entrega TEXT
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS metas_ritmo (
-            tramo TEXT PRIMARY KEY,
-            ritmo_objetivo REAL,
-            fecha_meta TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS piquetes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tramo TEXT,
+                piquete TEXT UNIQUE,
+                tipo_estructura TEXT,
+                cabezal TEXT,
+                longitud_poste TEXT,
+                cantidad_aisladores INTEGER DEFAULT 0,
+                metros_tendido REAL DEFAULT 0,
+                m3_excavacion REAL DEFAULT 0,
+                excavacion TEXT,
+                verticalizado TEXT,
+                desfile_de_poste TEXT,
+                montaje_riendas TEXT,
+                armado_de_crucetas TEXT,
+                montaje_aislador TEXT,
+                tendido TEXT,
+                flechado TEXT,
+                engrampado TEXT,
+                fecha_montaje TEXT,
+                tipo_de_equipo TEXT,
+                anexo_montaje TEXT,
+                idi TEXT,
+                observacion_ofm TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cronogramas (
+                tramo TEXT PRIMARY KEY,
+                inicio TEXT,
+                entrega TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS metas_ritmo (
+                tramo TEXT PRIMARY KEY,
+                ritmo_objetivo REAL,
+                fecha_meta TEXT
+            )
+        """)
+        conn.commit()
 
 inicializar_db()
 
@@ -358,9 +354,6 @@ if opcion == "📥 Migración Inicial (Excel)":
                 else:
                     df = df.dropna(subset=["PIQUETE"])
                     
-                    conn = conectar_db()
-                    conn.execute("DELETE FROM piquetes WHERE tramo = ?", (nombre_proyecto_manual,))
-                    
                     def get_val(row, *col_names):
                         for c in col_names:
                             if c in row.index:
@@ -374,58 +367,58 @@ if opcion == "📥 Migración Inicial (Excel)":
                         return None
 
                     registros_cargados = 0
-                    for _, row in df.iterrows():
-                        piquete_val = get_val(row, "PIQUETE")
-                        if piquete_val:
-                            cant_aisl_raw = get_val(row, "CANTIDAD AISLADORES", "CANT AISLADORES", "CANT. AISLADORES", "AISLADORES", "CANT AISLADOR", "CANTIDAD DE AISLADORES", "AISLADOR")
-                            if cant_aisl_raw is not None and str(cant_aisl_raw).strip() != "":
-                                try:
-                                    val_clean = str(cant_aisl_raw).replace(',', '.').strip()
-                                    cant_aisl = int(float(val_clean))
-                                except (ValueError, TypeError):
+                    with sqlite3.connect(DB_FILE_NAME) as conn:
+                        conn.execute("DELETE FROM piquetes WHERE tramo = ?", (nombre_proyecto_manual,))
+                        for _, row in df.iterrows():
+                            piquete_val = get_val(row, "PIQUETE")
+                            if piquete_val:
+                                cant_aisl_raw = get_val(row, "CANTIDAD AISLADORES", "CANT AISLADORES", "CANT. AISLADORES", "AISLADORES", "CANT AISLADOR", "CANTIDAD DE AISLADORES", "AISLADOR")
+                                if cant_aisl_raw is not None and str(cant_aisl_raw).strip() != "":
+                                    try:
+                                        val_clean = str(cant_aisl_raw).replace(',', '.').strip()
+                                        cant_aisl = int(float(val_clean))
+                                    except (ValueError, TypeError):
+                                        cant_aisl = 0
+                                else:
                                     cant_aisl = 0
-                            else:
-                                cant_aisl = 0
 
-                            m_tend = get_val(row, "METROS TENDIDO", "METROS", "VANO", "DISTANCIA")
-                            try:
-                                m_tend = float(str(m_tend).replace(',', '.').strip()) if m_tend is not None else 0.0
-                            except (ValueError, TypeError):
-                                m_tend = 0.0
+                                m_tend = get_val(row, "METROS TENDIDO", "METROS", "VANO", "DISTANCIA")
+                                try:
+                                    m_tend = float(str(m_tend).replace(',', '.').strip()) if m_tend is not None else 0.0
+                                except (ValueError, TypeError):
+                                    m_tend = 0.0
 
-                            m3_exc = get_val(row, "M3 EXCAVACION", "VOLUMEN EXCAVACION", "EXCAVACION M3")
-                            try:
-                                m3_exc = float(str(m3_exc).replace(',', '.').strip()) if m3_exc is not None else 0.0
-                            except (ValueError, TypeError):
-                                m3_exc = 0.0
+                                m3_exc = get_val(row, "M3 EXCAVACION", "VOLUMEN EXCAVACION", "EXCAVACION M3")
+                                try:
+                                    m3_exc = float(str(m3_exc).replace(',', '.').strip()) if m3_exc is not None else 0.0
+                                except (ValueError, TypeError):
+                                    m3_exc = 0.0
 
-                            f_excav = normalizar_fecha(get_val(row, "1. EXCAV PIQUETES", "EXCAV PIQUETES", "EXCAVACION"))
-                            f_vert = normalizar_fecha(get_val(row, "2. VERTICALIZADO", "VERTICALIZADO"))
-                            f_desf = normalizar_fecha(get_val(row, "3. DESFILE DE POSTE", "DESFILE DE POSTE", "DESFILE"))
-                            f_riend = normalizar_fecha(get_val(row, "4. MONTAJE RIENDAS", "MONTAJE RIENDAS", "RIENDAS"))
-                            f_cruc = normalizar_fecha(get_val(row, "5. ARMADO DE CRUCETAS", "ARMADO DE CRUCETAS", "ARMADO DE CRUCETA", "CRUCETAS"))
-                            f_aisl = normalizar_fecha(get_val(row, "6. MONTAJE DE AISLADOR (FECHA)", "MONTAJE DE AISLADOR", "MONTAJE AISLADOR"))
-                            f_tend = normalizar_fecha(get_val(row, "7. TENDIDO DE CONDUCTOR", "TENDIDO DE CONDUCTOR", "TENDIDO"))
-                            f_flec = normalizar_fecha(get_val(row, "8. FLECHADO", "FLECHADO"))
-                            f_engr = normalizar_fecha(get_val(row, "9. ENGRAMPADO", "ENGRAMPADO"))
-                            f_liber = normalizar_fecha(get_val(row, "10. FECHA MONTAJE / LIBERACIÓN FINAL", "FECHA DE LIBERACION", "FECHA MONTAJE"))
+                                f_excav = normalizar_fecha(get_val(row, "1. EXCAV PIQUETES", "EXCAV PIQUETES", "EXCAVACION"))
+                                f_vert = normalizar_fecha(get_val(row, "2. VERTICALIZADO", "VERTICALIZADO"))
+                                f_desf = normalizar_fecha(get_val(row, "3. DESFILE DE POSTE", "DESFILE DE POSTE", "DESFILE"))
+                                f_riend = normalizar_fecha(get_val(row, "4. MONTAJE RIENDAS", "MONTAJE RIENDAS", "RIENDAS"))
+                                f_cruc = normalizar_fecha(get_val(row, "5. ARMADO DE CRUCETAS", "ARMADO DE CRUCETAS", "ARMADO DE CRUCETA", "CRUCETAS"))
+                                f_aisl = normalizar_fecha(get_val(row, "6. MONTAJE DE AISLADOR (FECHA)", "MONTAJE DE AISLADOR", "MONTAJE AISLADOR"))
+                                f_tend = normalizar_fecha(get_val(row, "7. TENDIDO DE CONDUCTOR", "TENDIDO DE CONDUCTOR", "TENDIDO"))
+                                f_flec = normalizar_fecha(get_val(row, "8. FLECHADO", "FLECHADO"))
+                                f_engr = normalizar_fecha(get_val(row, "9. ENGRAMPADO", "ENGRAMPADO"))
+                                f_liber = normalizar_fecha(get_val(row, "10. FECHA MONTAJE / LIBERACIÓN FINAL", "FECHA DE LIBERACION", "FECHA MONTAJE"))
 
-                            conn.execute("""
-                                INSERT OR REPLACE INTO piquetes (
-                                    tramo, piquete, tipo_estructura, cabezal, longitud_poste, cantidad_aisladores, metros_tendido, m3_excavacion, excavacion, verticalizado, 
-                                    desfile_de_poste, montaje_riendas, armado_de_crucetas, montaje_aislador, tendido, flechado, engrampado, fecha_montaje, tipo_de_equipo, observacion_ofm
-                                )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (
-                                nombre_proyecto_manual, piquete_val, get_val(row, "TIPO ESTRUCTURA") or "S/D",
-                                get_val(row, "CABEZAL") or "S/D", get_val(row, "LONGITUD POSTE"), cant_aisl, m_tend, m3_exc,
-                                f_excav, f_vert, f_desf, f_riend, f_cruc, f_aisl, f_tend, f_flec, f_engr, f_liber,
-                                get_val(row, "TIPO DE EQUIPO", "EQUIPO"), get_val(row, "OBSERVACION", "OBSERVACION OFM")
-                            ))
-                            registros_cargados += 1
-                                
-                    conn.commit()
-                    conn.close()
+                                conn.execute("""
+                                    INSERT OR REPLACE INTO piquetes (
+                                        tramo, piquete, tipo_estructura, cabezal, longitud_poste, cantidad_aisladores, metros_tendido, m3_excavacion, excavacion, verticalizado, 
+                                        desfile_de_poste, montaje_riendas, armado_de_crucetas, montaje_aislador, tendido, flechado, engrampado, fecha_montaje, tipo_de_equipo, observacion_ofm
+                                    )
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (
+                                    nombre_proyecto_manual, piquete_val, get_val(row, "TIPO ESTRUCTURA") or "S/D",
+                                    get_val(row, "CABEZAL") or "S/D", get_val(row, "LONGITUD POSTE"), cant_aisl, m_tend, m3_exc,
+                                    f_excav, f_vert, f_desf, f_riend, f_cruc, f_aisl, f_tend, f_flec, f_engr, f_liber,
+                                    get_val(row, "TIPO DE EQUIPO", "EQUIPO"), get_val(row, "OBSERVACION", "OBSERVACION OFM")
+                                ))
+                                registros_cargados += 1
+                        conn.commit()
                     
                     if registros_cargados > 0:
                         upload_db_to_drive()
@@ -441,18 +434,16 @@ if opcion == "📥 Migración Inicial (Excel)":
 elif opcion == "📂 Visión por Proyecto y Detalle":
     st.subheader("📂 Visión Detallada por Proyecto / Frente")
     
-    conn = conectar_db()
     try:
-        proyectos_df = pd.read_sql_query("SELECT DISTINCT tramo FROM piquetes", conn)
-        lista_proyectos = [t for t in proyectos_df['tramo'].dropna().tolist() if str(t).strip().lower() != 'nan' and str(t).strip() != '']
+        with sqlite3.connect(DB_FILE_NAME) as conn:
+            proyectos_df = pd.read_sql_query("SELECT DISTINCT tramo FROM piquetes", conn)
+            lista_proyectos = [t for t in proyectos_df['tramo'].dropna().tolist() if str(t).strip().lower() != 'nan' and str(t).strip() != '']
     except Exception as e:
         st.error(f"Error al conectar con la base de datos: {e}")
-        conn.close()
         lista_proyectos = []
 
     if not lista_proyectos:
         st.warning("No hay datos cargados en la base de datos aún. Realiza una migración desde la pestaña de Excel.")
-        conn.close()
     else:
         idx_defecto = 0
         if st.session_state.proyecto_activo in lista_proyectos:
@@ -462,7 +453,9 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
         st.session_state.proyecto_activo = proyecto_sel
 
         if proyecto_sel:
-            df_proyecto = pd.read_sql_query("SELECT * FROM piquetes WHERE tramo = ?", conn, params=(proyecto_sel,))
+            with sqlite3.connect(DB_FILE_NAME) as conn:
+                df_proyecto = pd.read_sql_query("SELECT * FROM piquetes WHERE tramo = ?", conn, params=(proyecto_sel,))
+            
             df_proyecto["Avance_%"] = df_proyecto.apply(calcular_avance_piquete, axis=1)
 
             total_piquetes = len(df_proyecto)
@@ -527,17 +520,14 @@ elif opcion == "📂 Visión por Proyecto y Detalle":
                 file_name=f"reporte_{proyecto_sel}.csv",
             )
 
-    conn.close()
-
 # -------------------------------------------------------------------------
 # MÓDULO 3: INVENTARIO Y CONTEO POR COLUMNAS
 # -------------------------------------------------------------------------
 elif opcion == "📦 Inventario y Conteo de Columnas":
     st.subheader("📦 Métricas de Inventario y Control de Columnas")
     
-    conn = conectar_db()
-    df_obra = pd.read_sql_query("SELECT * FROM piquetes", conn)
-    conn.close()
+    with sqlite3.connect(DB_FILE_NAME) as conn:
+        df_obra = pd.read_sql_query("SELECT * FROM piquetes", conn)
     
     if df_obra.empty:
         st.info("No hay datos cargados en el sistema de control.")
@@ -627,9 +617,8 @@ elif opcion == "📦 Inventario y Conteo de Columnas":
 elif opcion == "📝 Carga y Gestión de Campo":
     st.subheader("📝 Gestión Operativa y Certificación de Avances")
     
-    conn = conectar_db()
-    df_combos = pd.read_sql_query("SELECT tramo, piquete FROM piquetes", conn)
-    conn.close()
+    with sqlite3.connect(DB_FILE_NAME) as conn:
+        df_combos = pd.read_sql_query("SELECT tramo, piquete FROM piquetes", conn)
     
     if df_combos.empty:
         st.info("Sin registros operativos. Por favor, cargue la planilla inicial en la pestaña de Migración.")
@@ -645,9 +634,8 @@ elif opcion == "📝 Carga y Gestión de Campo":
         piquetes_filtrados = df_combos[df_combos["tramo"] == tramo_sel]["piquete"].unique()
         piquete_sel = st.selectbox("Estructura / Piquete Específico:", piquetes_filtrados)
         
-        conn = conectar_db()
-        p_info = pd.read_sql_query("SELECT * FROM piquetes WHERE piquete = ? AND tramo = ?", conn, params=[piquete_sel, tramo_sel]).iloc[0]
-        conn.close()
+        with sqlite3.connect(DB_FILE_NAME) as conn:
+            p_info = pd.read_sql_query("SELECT * FROM piquetes WHERE piquete = ? AND tramo = ?", conn, params=[piquete_sel, tramo_sel]).iloc[0]
         
         cabezal_val = p_info["cabezal"] if p_info["cabezal"] and str(p_info["cabezal"]) != "None" else "S/D"
         l_poste = p_info["longitud_poste"] if p_info["longitud_poste"] and str(p_info["longitud_poste"]) != "None" else "N/A"
@@ -740,7 +728,7 @@ elif opcion == "📝 Carga y Gestión de Campo":
                         return "N/A"
                     else:
                         fecha_val = st.date_input(label, value=convertir_a_fecha(val_db), key=f"inp_f_{clave_db}_{piquete_sel}")
-                        return str(fecha_val) if fecha_val else None
+                        return fecha_val.strftime('%Y-%m-%d') if fecha_val else None
 
             col1, col2 = st.columns(2)
             with col1:
@@ -781,22 +769,21 @@ elif opcion == "📝 Carga y Gestión de Campo":
                 with open(os.path.join(CARPA_ARCHIVOS, nombre_redline), "wb") as f:
                     f.write(archivo_redline.getbuffer())
 
-            conn = conectar_db()
-            conn.execute("""
-                UPDATE piquetes SET 
-                    cabezal=?, cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, 
-                    excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, 
-                    armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, 
-                    engrampado=?, fecha_montaje=?, tipo_de_equipo=?, observacion_ofm=?, 
-                    anexo_montaje=?, idi=?
-                WHERE piquete=? AND tramo=?
-            """, (cabezal_input, int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), 
-                  f_excav, f_vert, f_desfile, f_riendas, f_crucetas, f_aislador, f_tendido, f_flechado, f_engramp, 
-                  str(f_montaje) if f_montaje else None, tipo_equipo_input, obs_ofm_input,
-                  str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, 
-                  piquete_sel, tramo_sel))
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(DB_FILE_NAME) as conn:
+                conn.execute("""
+                    UPDATE piquetes SET 
+                        cabezal=?, cantidad_aisladores=?, metros_tendido=?, m3_excavacion=?, 
+                        excavacion=?, verticalizado=?, desfile_de_poste=?, montaje_riendas=?, 
+                        armado_de_crucetas=?, montaje_aislador=?, tendido=?, flechado=?, 
+                        engrampado=?, fecha_montaje=?, tipo_de_equipo=?, observacion_ofm=?, 
+                        anexo_montaje=?, idi=?
+                    WHERE piquete=? AND tramo=?
+                """, (cabezal_input, int(cant_aisladores_input), float(metros_tendido_input), float(m3_excavacion_input), 
+                      f_excav, f_vert, f_desfile, f_riendas, f_crucetas, f_aislador, f_tendido, f_flechado, f_engramp, 
+                      f_montaje.strftime('%Y-%m-%d') if f_montaje else None, tipo_equipo_input, obs_ofm_input,
+                      str(nombre_anexo) if nombre_anexo else None, str(nombre_redline) if nombre_redline else None, 
+                      piquete_sel, tramo_sel))
+                conn.commit()
             
             upload_db_to_drive()
             st.session_state.proyecto_activo = tramo_sel
@@ -807,11 +794,10 @@ elif opcion == "📝 Carga y Gestión de Campo":
 # MÓDULO 1: ANALÍTICA AVANZADA Y KPIS
 # -------------------------------------------------------------------------
 else:
-    conn = conectar_db()
-    df_obra = pd.read_sql_query("SELECT * FROM piquetes", conn)
-    df_cronogramas = pd.read_sql_query("SELECT * FROM cronogramas", conn)
-    df_metas = pd.read_sql_query("SELECT * FROM metas_ritmo", conn)
-    conn.close()
+    with sqlite3.connect(DB_FILE_NAME) as conn:
+        df_obra = pd.read_sql_query("SELECT * FROM piquetes", conn)
+        df_cronogramas = pd.read_sql_query("SELECT * FROM cronogramas", conn)
+        df_metas = pd.read_sql_query("SELECT * FROM metas_ritmo", conn)
     
     if df_obra.empty:
         st.info("No existen registros de obra para procesar analíticas. Vaya al módulo de Migración.")
@@ -869,11 +855,10 @@ else:
             with col_f4:
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("💾 Guardar Parametrización en BD", type="primary", use_container_width=True):
-                    conn = conectar_db()
-                    conn.execute("INSERT OR REPLACE INTO cronogramas (tramo, inicio, entrega) VALUES (?, ?, ?)", (tramo_sel, str(f_inicio), str(f_entrega)))
-                    conn.execute("INSERT OR REPLACE INTO metas_ritmo (tramo, ritmo_objetivo, fecha_meta) VALUES (?, ?, ?)", (tramo_sel, ritmo_objetivo_input, str(f_entrega)))
-                    conn.commit()
-                    conn.close()
+                    with sqlite3.connect(DB_FILE_NAME) as conn:
+                        conn.execute("INSERT OR REPLACE INTO cronogramas (tramo, inicio, entrega) VALUES (?, ?, ?)", (tramo_sel, str(f_inicio), str(f_entrega)))
+                        conn.execute("INSERT OR REPLACE INTO metas_ritmo (tramo, ritmo_objetivo, fecha_meta) VALUES (?, ?, ?)", (tramo_sel, ritmo_objetivo_input, str(f_entrega)))
+                        conn.commit()
                     upload_db_to_drive()
                     st.session_state.proyecto_activo = tramo_sel
                     st.success("✔️ Parámetros contractuales y metas de ritmo guardados con éxito.")
