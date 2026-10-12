@@ -62,19 +62,19 @@ def calcular_avance_piquete(row_piquete):
 
 def normalizar_fecha(val):
     if pd.isna(val) or val is None:
-        return None
-    val_str = str(val).strip()
-    if val_str.upper() in ["N/A", "NO APLICA", "NA", "N/D", "-"]:
         return "N/A"
-    if val_str.lower() in ["nan", "none", "", "nat"]:
-        return None
+    val_str = str(val).strip()
+    if val_str.upper() in ["N/A", "NO APLICA", "NA", "N/D", "-", ""]:
+        return "N/A"
+    if val_str.lower() in ["nan", "none", "nat"]:
+        return "N/A"
     try:
         dt = pd.to_datetime(val_str, dayfirst=True, errors='coerce')
         if pd.notna(dt):
             return dt.strftime('%Y-%m-%d')
     except Exception:
         pass
-    return val_str
+    return "N/A"
 
 def enviar_reporte_correo(destinatarios, asunto, cuerpo, archivo_bytes, nombre_archivo):
     try:
@@ -1124,7 +1124,7 @@ else:
             if st.button("🚀 Enviar Reporte Ahora", type="primary"):
                 lista_correos = [e.strip() for e in emails_input.split(",") if e.strip()]
                 if not lista_correos:
-                    st.warning("Por favorable ingresa al menos un correo válido.")
+                    st.warning("Por favor ingresa al menos un correo válido.")
                 else:
                     cuerpo_html = f"""
                     <h2>⚡ Reporte Automático de Control de Obra</h2>
