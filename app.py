@@ -10,84 +10,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import streamlit.components.v1 as components
-import json
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
-DRIVE_FOLDER_ID = "1Gv2m6_uBDjQkM4QluwO_Zmhjdw4LM85X"
 DB_FILE_NAME = "obra_trazabilidad.db"
-
-# --- FUNCIONES GOOGLE DRIVE ---
-def get_drive_service():
-    if "gcp_service_account" not in st.secrets:
-        return None
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    
-    if "private_key" in creds_dict:
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-
-    creds = service_account.Credentials.from_service_account_info(
-        creds_dict, scopes=['https://www.googleapis.com/auth/drive']
-    )
-    return build('drive', 'v3', credentials=creds)
-
-def download_db_from_drive():
-    try:
-        service = get_drive_service()
-        if not service:
-            return
-        query = f"name = '{DB_FILE_NAME}' and trashed = false"
-        if DRIVE_FOLDER_ID:
-            query += f" and '{DRIVE_FOLDER_ID}' in parents"
-            
-        results = service.files().list(q=query, fields="files(id, name)").execute()
-        files = results.get('files', [])
-        
-        if files:
-            file_id = files[0]['id']
-            request = service.files().get_media(fileId=file_id)
-            with open(DB_FILE_NAME, 'wb') as f:
-                downloader = MediaIoBaseDownload(f, request)
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-            print("Base de datos descargada de Drive correctamente.")
-    except Exception as e:
-        print(f"Error al descargar de Drive: {e}")
-
-def upload_db_to_drive():
-    try:
-        service = get_drive_service()
-        if not service:
-            return False
-        query = f"name = '{DB_FILE_NAME}' and trashed = false"
-        if DRIVE_FOLDER_ID:
-            query += f" and '{DRIVE_FOLDER_ID}' in parents"
-            
-        results = service.files().list(q=query, fields="files(id, name)").execute()
-        files = results.get('files', [])
-        
-        media = MediaFileUpload(DB_FILE_NAME, mimetype='application/x-sqlite3', resumable=True)
-        
-        if files:
-            file_id = files[0]['id']
-            archivo = service.files().update(fileId=file_id, media_body=media).execute()
-        else:
-            file_metadata = {'name': DB_FILE_NAME}
-            if DRIVE_FOLDER_ID:
-                file_metadata['parents'] = [DRIVE_FOLDER_ID]
-            archivo = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        
-        st.success(f"✔️ Backup sincronizado en Google Drive con éxito (ID: {archivo.get('id')}).")
-        return True
-    except Exception as e:
-        st.error(f"❌ Error al sincronizar con Google Drive: {e}")
-        return False
-
-if "db_descargada" not in st.session_state:
-    download_db_from_drive()
-    st.session_state.db_descargada = True
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(layout="wide", page_title="Control de Obra Eléctrica Avanzado", page_icon="⚡")
@@ -421,7 +345,6 @@ if opcion == "📥 Migración Inicial (Excel)":
                         conn.commit()
                     
                     if registros_cargados > 0:
-                        upload_db_to_drive()
                         st.session_state.proyecto_activo = nombre_proyecto_manual
                         st.success(f"✔️ ¡Migración exitosa! Se procesaron {registros_cargados} piquetes correctamente.")
                         st.rerun()
@@ -785,7 +708,6 @@ elif opcion == "📝 Carga y Gestión de Campo":
                       piquete_sel, tramo_sel))
                 conn.commit()
             
-            upload_db_to_drive()
             st.session_state.proyecto_activo = tramo_sel
             st.success(f"✔️ Historial y observaciones del Piquete {piquete_sel} guardados correctamente.")
             st.rerun()
@@ -859,7 +781,6 @@ else:
                         conn.execute("INSERT OR REPLACE INTO cronogramas (tramo, inicio, entrega) VALUES (?, ?, ?)", (tramo_sel, str(f_inicio), str(f_entrega)))
                         conn.execute("INSERT OR REPLACE INTO metas_ritmo (tramo, ritmo_objetivo, fecha_meta) VALUES (?, ?, ?)", (tramo_sel, ritmo_objetivo_input, str(f_entrega)))
                         conn.commit()
-                    upload_db_to_drive()
                     st.session_state.proyecto_activo = tramo_sel
                     st.success("✔️ Parámetros contractuales y metas de ritmo guardados con éxito.")
                     st.rerun()
