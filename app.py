@@ -1066,7 +1066,7 @@ else:
             "Avance_%", 
             "anexo_montaje", 
             "idi"
-        ] + list(renomryl_columnas_export := renombrar_columnas_export).values()
+        ] + list(renombrar_columnas_export.values())
         
         st.markdown("---")
         st.markdown("### 📥 Exportar y Notificar Reportes de Trazabilidad")
